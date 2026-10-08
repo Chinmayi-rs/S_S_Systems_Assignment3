@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ballot Desk{% endblock %}</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+    <header class="topbar">
+        <a class="wordmark" href="/">Ballot Desk</a>
+        <nav class="nav-links" aria-label="Primary">
+            <a href="/dashboard">Desk</a>
+            <a href="/enrolment">Enrolment</a>
+            <a href="/vote">Ballot</a>
+            <a href="/candidates">Candidates</a>
+            <a href="/results">Results</a>
+            <a href="/audit" id="audit-link" hidden>Audit</a>
+        </nav>
+        <div class="top-actions">
+            <span class="user-chip" id="user-chip" hidden></span>
+            <a class="btn secondary" href="/login" data-signed-out>Sign in</a>
+            <a class="btn" href="/register" data-signed-out>Enrol</a>
+            <button class="btn secondary" type="button" id="logout-button" data-signed-in hidden>Sign out</button>
+        </div>
+    </header>
+
+    <main class="page">
+        <div id="alert-container"></div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        Student prototype of a federal polling desk. Not an official electoral system.
+    </footer>
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,35 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      SECRET_KEY: dev-secret-change-me
+      JWT_SECRET_KEY: dev-jwt-secret-change-me
+      IDENTITY_DATABASE_URL: sqlite:////app/data/identity.db
+      BALLOT_DATABASE_URL: sqlite:////app/data/ballot.db
+    tmpfs:
+      - /app/data
+    restart: unless-stopped
+
+  # GR-09: replace the sqlite URLs above with these two servers.
+  # They are defined now so the split is obvious, but the app does not
+  # require them until IDENTITY_DATABASE_URL / BALLOT_DATABASE_URL point here
+  # and psycopg is added to requirements.txt.
+  # identity-db:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_USER: identity
+  #     POSTGRES_PASSWORD: identity
+  #     POSTGRES_DB: identity
+  #   ports:
+  #     - "5432:5432"
+  # ballot-db:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_USER: ballot
+  #     POSTGRES_PASSWORD: ballot
+  #     POSTGRES_DB: ballot
+  #   ports:
+  #     - "5433:5432"

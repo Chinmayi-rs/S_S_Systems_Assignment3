@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Ballot · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Ballot paper</p>
+<h1>House and Senate</h1>
+<div id="vote-gate" class="card"><p>Checking eligibility…</p></div>
+<div id="ballot-paper" class="ballot-sheet" hidden>
+    <div class="row" style="justify-content: space-between;">
+        <h2 style="margin: 0;">House of Representatives</h2>
+        <button class="btn secondary" type="button" id="clear-ranking">Clear numbers</button>
+    </div>
+    <p class="lede">Tap candidates in the order you prefer them. Number every candidate once.</p>
+    <div id="house-list"></div>
+    <h2 style="margin-top: 1.2rem;">Senate — above the line</h2>
+    <p class="lede">Choose one group. Below-the-line numbering is not on this skeleton.</p>
+    <div id="senate-list"></div>
+    <div class="row" style="margin-top: 1rem;">
+        <button class="btn" type="button" id="review-button">Review ballot</button>
+    </div>
+</div>
+<div id="review-panel" class="card" hidden>
+    <h2>Check your ballot</h2>
+    <div id="review-body"></div>
+    <div class="row" style="margin-top: 1rem;">
+        <button class="btn secondary" type="button" id="back-button">Back</button>
+        <button class="btn" type="button" id="commit-button">Submit ballot</button>
+    </div>
+</div>
+<div id="done-panel" class="card" hidden>
+    <h2>Ballot accepted</h2>
+    <p>The paper is no longer shown. Keep this reference only as an acknowledgement that a ballot was stored.</p>
+    <p class="mono" id="reference"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/vote.js"></script>
+{% endblock %}

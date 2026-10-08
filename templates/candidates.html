@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Candidates · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Nomination</p>
+<h1>Candidates</h1>
+<p class="lede" id="candidate-election">Loading…</p>
+<div id="candidate-form" class="card" hidden>
+    <h2>Add a candidate</h2>
+    <form id="add-candidate" class="stack">
+        <div>
+            <label for="chamber">Chamber</label>
+            <select id="chamber" name="chamber">
+                <option value="house">House of Representatives</option>
+                <option value="senate">Senate group</option>
+            </select>
+        </div>
+        <div>
+            <label for="name">Name on the paper</label>
+            <input id="name" name="name" required>
+        </div>
+        <div>
+            <label for="party">Party label</label>
+            <input id="party" name="party" required>
+        </div>
+        <div>
+            <label for="ballot_order">Order</label>
+            <input id="ballot_order" name="ballot_order" type="number" min="1" value="1" required>
+        </div>
+        <button class="btn" type="submit">Save candidate</button>
+    </form>
+</div>
+<div class="card" style="margin-top: 1rem;">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order</th><th>Chamber</th><th>Name</th><th>Party</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="candidate-rows"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/candidates.js"></script>
+{% endblock %}

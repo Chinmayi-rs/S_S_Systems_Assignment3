@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Results · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Count</p>
+<h1>Results</h1>
+<p class="lede">First-preference totals for the House, and above-the-line totals for the Senate. A full distribution of preferences is not in this skeleton.</p>
+<div id="results-body" class="card"><p>Loading…</p></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/results.js"></script>
+{% endblock %}

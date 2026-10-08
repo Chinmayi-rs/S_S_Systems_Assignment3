@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · Ballot Desk{% endblock %}
+
+{% block content %}
+<div class="card narrow">
+    <p class="kicker">Sign in</p>
+    <h1>Open your desk</h1>
+    <form id="login-form" class="stack">
+        <div>
+            <label for="username">Username</label>
+            <input id="username" name="username" autocomplete="username" required>
+        </div>
+        <div>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn" type="submit">Sign in</button>
+    </form>
+    <p style="margin-top: 1rem;">No account yet? <a href="/register">Enrol as a voter</a>.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/login.js"></script>
+{% endblock %}

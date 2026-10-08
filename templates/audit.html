@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Audit · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Auditor</p>
+<h1>Administrative log</h1>
+<p class="lede">Privileged actions are listed here. A committed ballot is recorded without the voter and without the preferences.</p>
+<div class="card table-wrap">
+    <table>
+        <thead>
+            <tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr>
+        </thead>
+        <tbody id="audit-rows"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/audit.js"></script>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Ballot Desk{% endblock %}
+
+{% block content %}
+<section class="grid grid-2">
+    <div>
+        <p class="kicker">Federal election prototype</p>
+        <h1>Mark a ballot. Keep the count separate.</h1>
+        <p class="lede" id="election-lede">Loading the current election…</p>
+        <div class="row">
+            <a class="btn" href="/vote">Go to the ballot</a>
+            <a class="btn secondary" href="/register">Check enrolment</a>
+        </div>
+    </div>
+    <aside class="card">
+        <h2>Try a desk</h2>
+        <p class="lede">Same password pattern on every seeded account. Use Sign out to switch roles.</p>
+        <ul class="accounts">
+            <li><strong>voter</strong><span class="mono">voter1234</span><span>Eligible voter, Melbourne</span></li>
+            <li><strong>pending</strong><span class="mono">voter1234</span><span>Waiting on an enrolment officer</span></li>
+            <li><strong>officer</strong><span class="mono">officer1234</span><span>Enrolment officer</span></li>
+            <li><strong>delegate</strong><span class="mono">delegate1234</span><span>Commissioner's delegate</span></li>
+            <li><strong>auditor</strong><span class="mono">auditor1234</span><span>Reads the audit log</span></li>
+        </ul>
+    </aside>
+</section>
+
+<section class="grid grid-3" style="margin-top: 1rem;">
+    <article class="card">
+        <h3><span class="step-no">1</span>Enrol</h3>
+        <p>A citizen registers, then an enrolment officer confirms the division and eligibility.</p>
+    </article>
+    <article class="card">
+        <h3><span class="step-no">2</span>Vote</h3>
+        <p>House of Representatives is a full preference order. The Senate choice on this skeleton is above the line.</p>
+    </article>
+    <article class="card">
+        <h3><span class="step-no">3</span>Count</h3>
+        <p>First-preference totals stay hidden until a delegate closes the election. A delegate or auditor can preview them.</p>
+    </article>
+</section>
+
+<section class="card" style="margin-top: 1rem;">
+    <h2>Candidates on the paper</h2>
+    <div id="candidate-preview">Loading candidates…</div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/index.js"></script>
+{% endblock %}

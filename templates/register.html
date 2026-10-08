@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Enrol · Ballot Desk{% endblock %}
+
+{% block content %}
+<div class="card narrow">
+    <p class="kicker">Enrolment</p>
+    <h1>Register to vote</h1>
+    <p class="lede">This creates a voter account. It is not eligible until an enrolment officer verifies it.</p>
+    <form id="register-form" class="stack">
+        <div>
+            <label for="full_name">Full name</label>
+            <input id="full_name" name="full_name" autocomplete="name" required>
+        </div>
+        <div>
+            <label for="username">Username</label>
+            <input id="username" name="username" autocomplete="username" required>
+        </div>
+        <div>
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required>
+        </div>
+        <div>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div>
+            <label for="date_of_birth">Date of birth</label>
+            <input id="date_of_birth" name="date_of_birth" type="date" required>
+        </div>
+        <div>
+            <label for="address">Address</label>
+            <input id="address" name="address" autocomplete="street-address" required>
+        </div>
+        <div>
+            <label for="division">Division</label>
+            <input id="division" name="division" list="divisions" value="Melbourne" required>
+            <datalist id="divisions">
+                <option value="Melbourne"></option>
+                <option value="Sydney"></option>
+                <option value="Brisbane"></option>
+            </datalist>
+        </div>
+        <button class="btn" type="submit">Submit enrolment</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/register.js"></script>
+{% endblock %}
