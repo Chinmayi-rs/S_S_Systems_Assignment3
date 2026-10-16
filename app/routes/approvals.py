@@ -7,6 +7,7 @@ from app.models.approval import PendingApproval
 from app.models.user import User
 from app.services import approvals as service
 from app.services.approvals import ApprovalError
+from app.utils.constants import ROLE_DELEGATE
 from app.utils.helpers import json_error
 from app.utils.rbac import require_permission
 
@@ -14,7 +15,11 @@ approvals_bp = Blueprint('approvals', __name__)
 
 
 def _serialize(rows):
-    ids = {row.proposer_id for row in rows} | {row.decided_by_id for row in rows if row.decided_by_id}
+    ids = (
+        {row.proposer_id for row in rows}
+        | {row.approver_id for row in rows}
+        | {row.decided_by_id for row in rows if row.decided_by_id}
+    )
     names = {user.id: user.username for user in User.query.filter(User.id.in_(ids)).all()} if ids else {}
     return [{
         'id': row.id,
@@ -23,6 +28,8 @@ def _serialize(rows):
         'status': row.status,
         'proposer_id': row.proposer_id,
         'proposer_username': names.get(row.proposer_id),
+        'approver_id': row.approver_id,
+        'approver_username': names.get(row.approver_id),
         'decided_by_id': row.decided_by_id,
         'decided_by_username': names.get(row.decided_by_id),
         'created_at': row.created_at.isoformat() if row.created_at else None,
@@ -48,6 +55,20 @@ def list_approvals(current_user):
         query = query.filter_by(status=status)
     rows = query.order_by(PendingApproval.id.desc()).limit(200).all()
     return jsonify({'approvals': _serialize(rows)}), 200
+
+
+@approvals_bp.route('/delegates', methods=['GET'])
+@require_permission('approval.propose')
+def list_delegates(current_user):
+    """Delegates the current delegate may send a request to (everyone except themselves)."""
+    rows = (
+        User.query.filter(User.role == ROLE_DELEGATE, User.is_active.is_(True), User.id != current_user.id)
+        .order_by(User.username)
+        .all()
+    )
+    return jsonify({'delegates': [
+        {'id': user.id, 'username': user.username, 'full_name': user.full_name} for user in rows
+    ]}), 200
 
 
 @approvals_bp.route('', methods=['POST'], strict_slashes=False)

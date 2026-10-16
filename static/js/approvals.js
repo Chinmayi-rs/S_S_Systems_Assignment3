@@ -25,34 +25,36 @@ async function loadApprovals() {
   const rows = data.approvals || [];
   body.replaceChildren();
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="7">No requests yet.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8">No requests yet.</td></tr>';
     return;
   }
   rows.forEach((row) => {
     const [kind, text] = describeApproval(row);
     const tr = document.createElement('tr');
     tr.innerHTML = '<td>' + row.id + '</td><td>' + escapeHtml(kind) + '</td><td>' + escapeHtml(text)
-      + '</td><td>' + escapeHtml(row.proposer_username || '—') + '</td><td>' + escapeHtml(row.status)
+      + '</td><td>' + escapeHtml(row.proposer_username || '—') + '</td><td>' + escapeHtml(row.approver_username || '—')
+      + '</td><td>' + escapeHtml(row.status)
       + '</td><td>' + escapeHtml(row.decided_by_username || '—') + '</td><td></td>';
     const cell = tr.lastElementChild;
     if (isDelegate && row.status === 'proposed') {
-      const mine = row.proposer_id === authUser.id;
-      if (mine) {
-        cell.append('Waiting for a second delegate ');
-      } else {
+      if (row.approver_id === authUser.id) {
+        // this request was sent to me: I can approve or reject it
         const approve = document.createElement('button');
         approve.type = 'button';
         approve.className = 'btn';
         approve.textContent = 'Approve';
         approve.addEventListener('click', () => decide(row.id, 'approve'));
-        cell.append(approve, ' ');
+        const reject = document.createElement('button');
+        reject.type = 'button';
+        reject.className = 'btn secondary';
+        reject.textContent = 'Reject';
+        reject.addEventListener('click', () => decide(row.id, 'reject'));
+        cell.append(approve, ' ', reject);
+      } else if (row.proposer_id === authUser.id) {
+        cell.append('Waiting for ' + (row.approver_username || 'the other delegate'));
+      } else {
+        cell.append('Sent to another delegate');
       }
-      const reject = document.createElement('button');
-      reject.type = 'button';
-      reject.className = 'btn secondary';
-      reject.textContent = mine ? 'Withdraw' : 'Reject';
-      reject.addEventListener('click', () => decide(row.id, 'reject'));
-      cell.append(reject);
     }
     body.append(tr);
   });

@@ -39,7 +39,9 @@ def login(client, username, password):
 def delegate_acts(client, headers=None):
     headers = headers or login(client, 'delegate', 'delegate1234')
     client.post('/api/candidates', json={'name': 'New One', 'party': 'Independent', 'chamber': 'house', 'ballot_order': 9}, headers=headers)
-    proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': 'closed'}, headers=headers)
+    # GR-14: the proposer chooses the approver (delegate2 is the only other delegate)
+    approver_id = client.get('/api/approvals/delegates', headers=headers).get_json()['delegates'][0]['id']
+    proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': 'closed', 'approver_id': approver_id}, headers=headers)
     second = login(client, 'delegate2', 'delegate21234')
     client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
     return headers

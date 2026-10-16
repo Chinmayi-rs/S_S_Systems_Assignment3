@@ -1,11 +1,19 @@
 """GR-14 Two-person authorisation for result-affecting actions.
 
-A delegate proposes. A DIFFERENT delegate approves. Only then does the action run.
-Add a new protected action by adding one entry to HANDLERS (validate + execute).
+A delegate proposes and CHOOSES which other delegate must approve. Only that delegate can approve
+or reject. While the request is waiting, nobody can send another request for the same target
+(the poll, or one candidate) - not other delegates, and not the chosen approver either.
+Only then does the action run.
+
+Add a new protected action by adding one entry to HANDLERS (validate + execute). By default the
+whole action type is locked while a request is waiting; add an entry to TARGETS to lock something
+narrower (like one candidate).
 GR-13 adds 'results.release' here; a recount would be another entry.
 """
 import json
 from datetime import datetime
+
+from sqlalchemy.exc import IntegrityError
 
 from app import db
 from app.models.approval import PendingApproval
@@ -14,7 +22,7 @@ from app.models.election import Election
 from app.models.user import User
 from app.services.audit_log import append_audit
 from app.services.elections import current_election
-from app.utils.constants import ELECTION_CLOSED, ELECTION_OPEN
+from app.utils.constants import ELECTION_CLOSED, ELECTION_OPEN, ROLE_DELEGATE
 
 PROPOSED, APPROVED, EXECUTED, REJECTED = 'proposed', 'approved', 'executed', 'rejected'
 
@@ -82,24 +90,79 @@ HANDLERS = {
 }
 
 
+# What each request is "about". One waiting request per target.
+TARGETS = {
+    'election.status': lambda payload: f"election:{payload['election_id']}",
+    'candidate.set_active': lambda payload: f"candidate:{payload['candidate_id']}",
+}
+
+
+def _target_key(action_type, payload):
+    return TARGETS.get(action_type, lambda _payload: action_type)(payload)
+
+
 # ---- the workflow ------------------------------------------------------------------------------
+
+def _choose_approver(proposer, data):
+    """The proposer must name another active delegate."""
+    raw = data.get('approver_id')
+    if isinstance(raw, bool):
+        raw = None
+    try:
+        approver_id = int(raw)
+    except (TypeError, ValueError):
+        raise ApprovalError('Choose which delegate must approve this request (approver_id)')
+    if approver_id == proposer.id:
+        raise ApprovalError('You cannot send a request to yourself. Choose another delegate.')
+    approver = db.session.get(User, approver_id)
+    if not approver or not approver.is_active or approver.role != ROLE_DELEGATE:
+        raise ApprovalError('The approver must be an active delegate')
+    return approver
+
 
 def propose(proposer, data):
     handler = HANDLERS.get(data.get('action_type'))
     if not handler:
         raise ApprovalError('Unknown action_type. Use one of: ' + ', '.join(sorted(HANDLERS)))
     payload = handler[0](data)
+    target = _target_key(data['action_type'], payload)
+
+    # One waiting request per target. This also stops the chosen approver (and everyone else)
+    # from sending their own request for the same poll or candidate.
+    waiting = PendingApproval.query.filter_by(target_key=target, status=PROPOSED).first()
+    if waiting:
+        waiting_for = db.session.get(User, waiting.approver_id)
+        raise ApprovalError(
+            f'Request #{waiting.id} for this is already waiting for {waiting_for.username}. '
+            'No new request can be sent until it is approved or rejected.',
+            409,
+        )
+
+    approver = _choose_approver(proposer, data)
     row = PendingApproval(
         action_type=data['action_type'],
         payload=json.dumps(payload, sort_keys=True),
+        target_key=target,
         proposer_id=proposer.id,
+        approver_id=approver.id,
         status=PROPOSED,
     )
     db.session.add(row)
-    db.session.flush()
+    try:
+        db.session.flush()
+    except IntegrityError:
+        # two delegates sent a request for the same target at the same moment; the database let only one in
+        db.session.rollback()
+        raise ApprovalError('Another request for this was sent at the same moment. Refresh and check the Approvals page.', 409)
     append_audit(
         'approval.proposed',
-        json.dumps({'approval_id': row.id, 'action_type': row.action_type, 'payload': payload}),
+        json.dumps({
+            'approval_id': row.id,
+            'action_type': row.action_type,
+            'payload': payload,
+            'approver_id': approver.id,
+            'approver': approver.username,
+        }),
         actor=proposer,
     )
     db.session.commit()
@@ -115,6 +178,19 @@ def _load_open_request(approval_id):
     return row
 
 
+def _require_chosen_approver(row, delegate, attempt):
+    """Only the delegate the request was sent to may decide it. Anyone else leaves a trace."""
+    if row.approver_id == delegate.id:
+        return
+    append_audit(
+        'approval.wrong_approver_blocked',
+        json.dumps({'approval_id': row.id, 'attempt': attempt}),
+        actor=delegate,
+    )
+    db.session.commit()
+    raise ApprovalError('This request was sent to another delegate. Only that delegate can approve or reject it.', 403)
+
+
 def approve(approver, approval_id):
     row = _load_open_request(approval_id)
 
@@ -123,9 +199,10 @@ def approve(approver, approval_id):
         append_audit('approval.self_approval_blocked', json.dumps({'approval_id': row.id}), actor=approver)
         db.session.commit()
         raise ApprovalError('The person who proposed an action cannot approve it. A second delegate is needed.', 403)
+    _require_chosen_approver(row, approver, 'approve')
 
     # Atomic claim: if two approvals race, only one UPDATE matches status='proposed'.
-    claimed = PendingApproval.query.filter_by(id=row.id, status=PROPOSED).update(
+    claimed = PendingApproval.query.filter_by(id=row.id, status=PROPOSED, approver_id=approver.id).update(
         {'status': APPROVED, 'decided_by_id': approver.id, 'decided_at': datetime.utcnow()},
         synchronize_session=False,
     )
@@ -158,8 +235,9 @@ def approve(approver, approval_id):
 
 
 def reject(delegate, approval_id):
-    """Any delegate may reject. The proposer rejecting their own request is a withdrawal."""
+    """Only the delegate the request was sent to may reject it (the proposer cannot withdraw it)."""
     row = _load_open_request(approval_id)
+    _require_chosen_approver(row, delegate, 'reject')
     row.status = REJECTED
     row.decided_by_id = delegate.id
     row.decided_at = datetime.utcnow()

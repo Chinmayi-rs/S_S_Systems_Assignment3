@@ -35,8 +35,9 @@ def make_some_events(client):
     # GR-14: poll changes need a proposer and a different approver
     delegate = login(client, 'delegate', 'delegate1234')
     second = login(client, 'delegate2', 'delegate21234')
+    approver_id = client.get('/api/approvals/delegates', headers=delegate).get_json()['delegates'][0]['id']  # delegate2
     for status in ('closed', 'open'):
-        proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': status}, headers=delegate)
+        proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': status, 'approver_id': approver_id}, headers=delegate)
         client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
 
 

@@ -64,18 +64,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       approvals.href = '/approvals';
       approvals.textContent = 'Approvals';
       actions.append(approvals);
+
+      // GR-14: the proposer chooses which delegate must approve
+      const choice = document.createElement('div');
+      const choiceLabel = document.createElement('label');
+      choiceLabel.setAttribute('for', 'poll-approver');
+      choiceLabel.textContent = 'Send the request to';
+      const approver = document.createElement('select');
+      approver.id = 'poll-approver';
+      choice.append(choiceLabel, approver);
+      actions.insertBefore(choice, toggle);
+      const others = await loadApproverChoices(approver);
+      const waiting = (await loadWaitingRequests()).find((request) => request.action_type === 'election.status');
+      if (waiting) {
+        toggle.disabled = true;
+        approver.disabled = true;
+        const waitingFor = waiting.approver_id === user.id ? 'you (open Approvals to decide)' : waiting.approver_username;
+        pollLine.textContent += ' Request #' + waiting.id + ' is waiting for ' + waitingFor
+          + '. No new request can be sent until it is decided.';
+      } else if (!others) {
+        toggle.disabled = true;
+        pollLine.textContent += ' There is no other delegate to approve a request.';
+      }
       toggle.addEventListener('click', async () => {
         toggle.disabled = true;
         try {
           const next = election.status === 'open' ? 'closed' : 'open';
           const result = await apiRequest('/approvals', {
             method: 'POST',
-            body: JSON.stringify({ action_type: 'election.status', status: next }),
+            body: JSON.stringify({ action_type: 'election.status', status: next, approver_id: Number(approver.value) }),
           });
-          showAlert('Request #' + result.approval.id + ' sent. A second delegate must approve it on the Approvals page.', 'success');
+          approver.disabled = true;
+          showAlert('Request #' + result.approval.id + ' sent to ' + result.approval.approver_username + '. Only that delegate can approve or reject it.', 'success');
         } catch (err) {
           showAlert(err.message, 'danger');
-        } finally {
           toggle.disabled = false;
         }
       });
