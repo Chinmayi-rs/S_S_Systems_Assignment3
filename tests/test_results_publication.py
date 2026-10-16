@@ -320,19 +320,45 @@ def test_the_poll_cannot_be_reopened_after_publication(ctx):
     assert 'published' in refused.get_json()['error']
 
 
-def test_a_release_waiting_when_the_poll_is_reopened_cannot_run(ctx):
+def test_nobody_can_reopen_the_poll_while_a_release_is_waiting(ctx):
     client, app, _ = ctx
     first, second = two_delegates(client)
     close_poll(client, first, second)
     release_id = propose_release(client, first).get_json()['approval']['id']
-    reopen = propose(client, second, {'action_type': 'election.status', 'status': 'open'}, approver='delegate')
-    assert reopen.status_code == 201
-    assert client.post(f"/api/approvals/{reopen.get_json()['approval']['id']}/approve", headers=first).status_code == 200
 
-    assert client.post(f'/api/approvals/{release_id}/approve', headers=second).status_code == 409
+    reopen = {'action_type': 'election.status', 'status': 'open'}
+    # the proposer, the chosen approver and a third delegate are all refused
+    for headers, other in ((first, 'delegate2'), (second, 'delegate')):
+        refused = propose(client, headers, reopen, approver=other)
+        assert refused.status_code == 409
+        assert 'publish the results is waiting' in refused.get_json()['error']
     with app.app_context():
-        assert PublishedResult.query.count() == 0
-        assert db.session.get(PendingApproval, release_id).status == 'proposed'  # undone, not half-done
+        from app.services.seed import create_user
+        create_user('delegate3', 'delegate3@example.test', 'delegate31234', 'Third Delegate',
+                    'commissioner_delegate', '1980-01-01', 'Parliament precinct', 'Melbourne')
+        db.session.commit()
+    third = login(client, 'delegate3', 'delegate31234')
+    assert propose(client, third, reopen, approver='delegate').status_code == 409
+    with app.app_context():
+        assert PendingApproval.query.filter_by(action_type='election.status', status='proposed').count() == 0
+
+    # once the release is decided the block goes away (rejected: the poll may be reopened again)
+    assert client.post(f'/api/approvals/{release_id}/reject', headers=second).status_code == 200
+    assert propose(client, first, reopen).status_code == 201
+
+
+def test_a_release_cannot_be_proposed_while_a_reopen_is_waiting(ctx):
+    client, app, _ = ctx
+    first, second = two_delegates(client)
+    close_poll(client, first, second)
+    reopen_id = propose(client, second, {'action_type': 'election.status', 'status': 'open'}, approver='delegate').get_json()['approval']['id']
+
+    refused = propose_release(client, first)
+    assert refused.status_code == 409
+    assert 'reopen the poll is waiting' in refused.get_json()['error']
+
+    assert client.post(f'/api/approvals/{reopen_id}/reject', headers=first).status_code == 200
+    assert propose_release(client, first).status_code == 201
 
 
 # ---- GR-12 plug-in point -----------------------------------------------------------------------

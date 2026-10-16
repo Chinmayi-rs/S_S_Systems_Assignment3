@@ -109,7 +109,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         pollLine.textContent += ' Results can be published once the poll is closed.';
       } else if (waitingRelease) {
         publish.disabled = true;
-        pollLine.textContent += ' Publishing request #' + waitingRelease.id + ' is waiting for ' + waitingFor(waitingRelease) + '.';
+        toggle.disabled = true;  // nobody can reopen the poll while the publish request is waiting
+        pollLine.textContent += ' Publishing request #' + waitingRelease.id + ' is waiting for ' + waitingFor(waitingRelease)
+          + '. The poll cannot be reopened until it is decided.';
       } else if (!others) {
         publish.disabled = true;
       }

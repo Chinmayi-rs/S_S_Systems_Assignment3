@@ -49,7 +49,28 @@ def _validate_election_status(data):
     if election.status == status:
         raise ApprovalError('The poll is already ' + status, 409)
     _refuse_reopen_after_publication(election.id, status)
+    _refuse_reopen_while_release_waits(election.id, status)
     return {'election_id': election.id, 'status': status}
+
+
+def _waiting_request(action_type, election_id, **payload_match):
+    for row in PendingApproval.query.filter_by(action_type=action_type, status=PROPOSED).all():
+        payload = json.loads(row.payload)
+        if payload.get('election_id') == election_id and all(payload.get(k) == v for k, v in payload_match.items()):
+            return row
+    return None
+
+
+def _refuse_reopen_while_release_waits(election_id, status):
+    # GR-13: while a request to publish the results is waiting, nobody (the proposer, the approver or any
+    # other delegate) can send a request to open the poll again.
+    if status != ELECTION_OPEN:
+        return
+    waiting = _waiting_request('results.release', election_id)
+    if waiting:
+        raise ApprovalError(
+            f'Request #{waiting.id} to publish the results is waiting, so the poll cannot be reopened '
+            'until that request is approved or rejected.', 409)
 
 
 def _refuse_reopen_after_publication(election_id, status):
@@ -105,6 +126,10 @@ def _validate_results_release(data):
         raise ApprovalError('Close the poll before publishing the results', 409)
     if results_publication.get_published(election.id):
         raise ApprovalError('The results of this election are already published', 409)
+    # a waiting request to reopen the poll would make this one fail, so it must be decided first
+    reopen = _waiting_request('election.status', election.id, status=ELECTION_OPEN)
+    if reopen:
+        raise ApprovalError(f'Request #{reopen.id} to reopen the poll is waiting. Decide it before publishing the results.', 409)
     return {'election_id': election.id}
 
 

@@ -128,7 +128,7 @@ Passwords are bcrypt, matching the banking template, until GR-01 switches them t
 - The result is written as canonical JSON (sorted keys, no spaces) together with who proposed it, who approved it and the audit log head. SHA-256 of that JSON is signed with the election's own Ed25519 key, with the prefix `BALLOTDESK-RESULTS-v1|`.
 - Stored in `published_results` (one row per election, UPDATE and DELETE blocked by triggers). The key's fingerprint is written to the audit chain (`results.key.registered`).
 - The key is encrypted with AES-GCM using `RESULTS_KEY_SECRET` (set it; do not reuse `DELEGATE_KEY_SECRET`).
-- Before publication anybody who is not a delegate or auditor gets 403, whether the poll is open or closed. A published poll cannot be reopened.
+- Before publication anybody who is not a delegate or auditor gets 403, whether the poll is open or closed. While a publish request is waiting, nobody can send a request to reopen the poll (and no publish request can be sent while a reopen request is waiting). A published poll cannot be reopened.
 - `GR-12` plugs in at `counts_agree()` in `services/results_publication.py`. It returns True until the second counter exists.
 
 Check a result offline (needs only `pip install cryptography`). Download the three files from the Results page, then:
