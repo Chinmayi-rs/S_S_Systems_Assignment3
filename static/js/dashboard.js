@@ -75,17 +75,48 @@ document.addEventListener('DOMContentLoaded', async () => {
       choice.append(choiceLabel, approver);
       actions.insertBefore(choice, toggle);
       const others = await loadApproverChoices(approver);
-      const waiting = (await loadWaitingRequests()).find((request) => request.action_type === 'election.status');
+      const waitingRequests = await loadWaitingRequests();
+      const waiting = waitingRequests.find((request) => request.action_type === 'election.status');
+      const waitingRelease = waitingRequests.find((request) => request.action_type === 'results.release');
+      const published = (await apiRequest('/results')).published === true;
+
+      // GR-13: publishing the signed results is a second two-delegate action, sent to the same chosen approver
+      const publish = document.createElement('button');
+      publish.className = 'btn';
+      publish.type = 'button';
+      publish.textContent = 'Propose: publish results';
+      actions.insertBefore(publish, candidates);
+
+      const waitingFor = (request) => (request.approver_id === user.id ? 'you (open Approvals to decide)' : request.approver_username);
+      const syncApprover = () => { approver.disabled = toggle.disabled && publish.disabled; };
+
       if (waiting) {
         toggle.disabled = true;
-        approver.disabled = true;
-        const waitingFor = waiting.approver_id === user.id ? 'you (open Approvals to decide)' : waiting.approver_username;
-        pollLine.textContent += ' Request #' + waiting.id + ' is waiting for ' + waitingFor
+        pollLine.textContent += ' Request #' + waiting.id + ' is waiting for ' + waitingFor(waiting)
           + '. No new request can be sent until it is decided.';
       } else if (!others) {
         toggle.disabled = true;
         pollLine.textContent += ' There is no other delegate to approve a request.';
       }
+
+      if (published) {
+        toggle.disabled = true;
+        publish.disabled = true;
+        publish.textContent = 'Results published';
+        pollLine.textContent += ' The results are published and signed, so the poll stays closed.';
+      } else if (election.status !== 'closed') {
+        publish.disabled = true;
+        pollLine.textContent += ' Results can be published once the poll is closed.';
+      } else if (waitingRelease) {
+        publish.disabled = true;
+        toggle.disabled = true;  // nobody can reopen the poll while the publish request is waiting
+        pollLine.textContent += ' Publishing request #' + waitingRelease.id + ' is waiting for ' + waitingFor(waitingRelease)
+          + '. The poll cannot be reopened until it is decided.';
+      } else if (!others) {
+        publish.disabled = true;
+      }
+      syncApprover();
+
       toggle.addEventListener('click', async () => {
         toggle.disabled = true;
         try {
@@ -94,12 +125,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             method: 'POST',
             body: JSON.stringify({ action_type: 'election.status', status: next, approver_id: Number(approver.value) }),
           });
-          approver.disabled = true;
           showAlert('Request #' + result.approval.id + ' sent to ' + result.approval.approver_username + '. Only that delegate can approve or reject it.', 'success');
         } catch (err) {
           showAlert(err.message, 'danger');
           toggle.disabled = false;
         }
+        syncApprover();
+      });
+
+      publish.addEventListener('click', async () => {
+        publish.disabled = true;
+        try {
+          const result = await apiRequest('/approvals', {
+            method: 'POST',
+            body: JSON.stringify({ action_type: 'results.release', approver_id: Number(approver.value) }),
+          });
+          showAlert('Request #' + result.approval.id + ' to publish the results was sent to ' + result.approval.approver_username
+            + '. Nothing is public until that delegate approves it.', 'success');
+        } catch (err) {
+          showAlert(err.message, 'danger');
+          publish.disabled = false;
+        }
+        syncApprover();
       });
     } else if (user.role === 'auditor') {
       actions.innerHTML = '<h2>Audit</h2><p>Read the record of administrative actions. Vote content is not stored here.</p>';

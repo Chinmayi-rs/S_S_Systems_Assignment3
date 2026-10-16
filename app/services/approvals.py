@@ -8,7 +8,9 @@ Only then does the action run.
 Add a new protected action by adding one entry to HANDLERS (validate + execute). By default the
 whole action type is locked while a request is waiting; add an entry to TARGETS to lock something
 narrower (like one candidate).
-GR-13 adds 'results.release' here; a recount would be another entry.
+GR-13 adds 'results.release' here (sign and publish the final results); a recount would be another entry.
+
+execute(payload, note, ctx) gets ctx = {'approval_id', 'proposer', 'approver'}: the two people involved.
 """
 import json
 from datetime import datetime
@@ -21,6 +23,7 @@ from app.models.candidate import Candidate
 from app.models.election import Election
 from app.models.user import User
 from app.services.audit_log import append_audit
+from app.services import results_publication
 from app.services.elections import current_election
 from app.utils.constants import ELECTION_CLOSED, ELECTION_OPEN, ROLE_DELEGATE
 
@@ -45,13 +48,42 @@ def _validate_election_status(data):
         raise ApprovalError('No election is configured', 404)
     if election.status == status:
         raise ApprovalError('The poll is already ' + status, 409)
+    _refuse_reopen_after_publication(election.id, status)
+    _refuse_reopen_while_release_waits(election.id, status)
     return {'election_id': election.id, 'status': status}
 
 
-def _execute_election_status(payload, note):
+def _waiting_request(action_type, election_id, **payload_match):
+    for row in PendingApproval.query.filter_by(action_type=action_type, status=PROPOSED).all():
+        payload = json.loads(row.payload)
+        if payload.get('election_id') == election_id and all(payload.get(k) == v for k, v in payload_match.items()):
+            return row
+    return None
+
+
+def _refuse_reopen_while_release_waits(election_id, status):
+    # GR-13: while a request to publish the results is waiting, nobody (the proposer, the approver or any
+    # other delegate) can send a request to open the poll again.
+    if status != ELECTION_OPEN:
+        return
+    waiting = _waiting_request('results.release', election_id)
+    if waiting:
+        raise ApprovalError(
+            f'Request #{waiting.id} to publish the results is waiting, so the poll cannot be reopened '
+            'until that request is approved or rejected.', 409)
+
+
+def _refuse_reopen_after_publication(election_id, status):
+    # GR-13: a signed result is final. Reopening would let new ballots make the published count wrong.
+    if status == ELECTION_OPEN and results_publication.get_published(election_id):
+        raise ApprovalError('The results are already published, so the poll cannot be reopened', 409)
+
+
+def _execute_election_status(payload, note, ctx=None):
     election = db.session.get(Election, payload['election_id'])
     if election.status == payload['status']:  # state changed since it was proposed
         raise ApprovalError('The poll is already ' + payload['status'], 409)
+    _refuse_reopen_after_publication(election.id, payload['status'])
     previous = election.status
     election.status = payload['status']
     return 'election.status', f"{previous} -> {payload['status']} [{note}]"
@@ -74,7 +106,7 @@ def _validate_candidate_active(data):
     return {'candidate_id': candidate.id, 'active': active}
 
 
-def _execute_candidate_active(payload, note):
+def _execute_candidate_active(payload, note, ctx=None):
     candidate = db.session.get(Candidate, payload['candidate_id'])
     if candidate.active == payload['active']:
         raise ApprovalError('The candidate is already in that state', 409)
@@ -84,9 +116,46 @@ def _execute_candidate_active(payload, note):
     return 'candidate.update', detail
 
 
+# ---- results.release: sign and publish the final results (GR-13) ------------------------------
+
+def _validate_results_release(data):
+    election = current_election()
+    if not election:
+        raise ApprovalError('No election is configured', 404)
+    if election.status != ELECTION_CLOSED:
+        raise ApprovalError('Close the poll before publishing the results', 409)
+    if results_publication.get_published(election.id):
+        raise ApprovalError('The results of this election are already published', 409)
+    # a waiting request to reopen the poll would make this one fail, so it must be decided first
+    reopen = _waiting_request('election.status', election.id, status=ELECTION_OPEN)
+    if reopen:
+        raise ApprovalError(f'Request #{reopen.id} to reopen the poll is waiting. Decide it before publishing the results.', 409)
+    return {'election_id': election.id}
+
+
+def _execute_results_release(payload, note, ctx):
+    election = db.session.get(Election, payload['election_id'])
+    # the poll may have been reopened while the request was waiting; the count is made now, not at proposal time
+    if election.status != ELECTION_CLOSED:
+        raise ApprovalError('The poll is no longer closed, so the results cannot be published', 409)
+    try:
+        row = results_publication.publish(election, ctx['proposer'], ctx['approver'], ctx['approval_id'])
+    except results_publication.PublicationError as err:
+        raise ApprovalError(err.message, err.status)
+    detail = json.dumps({
+        'election_id': election.id,
+        'sha256': row.sha256,
+        'key_fingerprint': row.key_fingerprint,
+        'published_at': row.published_at.isoformat() + 'Z',
+        'approval': note,
+    })
+    return 'results.release', detail
+
+
 HANDLERS = {
     'election.status': (_validate_election_status, _execute_election_status),
     'candidate.set_active': (_validate_candidate_active, _execute_candidate_active),
+    'results.release': (_validate_results_release, _execute_results_release),
 }
 
 
@@ -94,6 +163,7 @@ HANDLERS = {
 TARGETS = {
     'election.status': lambda payload: f"election:{payload['election_id']}",
     'candidate.set_active': lambda payload: f"candidate:{payload['candidate_id']}",
+    'results.release': lambda payload: f"results:{payload['election_id']}",
 }
 
 
@@ -217,7 +287,8 @@ def approve(approver, approval_id):
         raise ApprovalError('This action type is no longer supported', 409)
 
     # If execute() raises, the route rolls back everything above and the request stays "proposed".
-    action, detail = handler[1](json.loads(row.payload), note)
+    ctx = {'approval_id': row.id, 'proposer': proposer, 'approver': approver}
+    action, detail = handler[1](json.loads(row.payload), note, ctx)
     append_audit(
         'approval.approved',
         json.dumps({

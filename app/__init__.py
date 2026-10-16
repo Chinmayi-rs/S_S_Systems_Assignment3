@@ -52,7 +52,7 @@ def create_app():
     def expired_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    from app.models import approval, audit, ballot, candidate, election, signing, user  # noqa: F401
+    from app.models import approval, audit, ballot, candidate, election, published_result, signing, user  # noqa: F401
     from app.routes.approvals import approvals_bp
     from app.routes.audit import audit_bp
     from app.routes.auth import auth_bp

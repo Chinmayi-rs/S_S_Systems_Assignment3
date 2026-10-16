@@ -91,7 +91,7 @@ def test_ballot_is_accepted_once(client):
     assert again.status_code == 409
 
 
-def test_results_stay_hidden_until_close(client):
+def test_results_stay_hidden_until_published(client):
     hidden = client.get('/api/results')
     assert hidden.status_code == 403
 
@@ -116,7 +116,19 @@ def test_results_stay_hidden_until_close(client):
     second = login(client, 'delegate2', 'delegate21234')
     closed = client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
     assert closed.status_code == 200
+
+    # GR-13: closing the poll is not publishing. Outsiders still get 403 and delegates still only see a preview.
+    assert client.get('/api/results').status_code == 403
+    still_preview = client.get('/api/results', headers=delegate).get_json()
+    assert still_preview['preview'] is True and still_preview['published'] is False
+
+    # the results go public only after two delegates publish them (signed)
+    release = client.post('/api/approvals', json={'action_type': 'results.release', 'approver_id': approver_id}, headers=delegate)
+    assert release.status_code == 201
+    done = client.post(f"/api/approvals/{release.get_json()['approval']['id']}/approve", headers=second)
+    assert done.status_code == 200
     published = client.get('/api/results')
     assert published.status_code == 200
     assert published.get_json()['preview'] is False
+    assert published.get_json()['published'] is True
     assert published.get_json()['method'] == 'first-preference'
