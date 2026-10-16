@@ -16,15 +16,16 @@ async function loadCandidates() {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'btn secondary';
-      button.textContent = 'Withdraw';
+      button.textContent = 'Propose withdrawal';
       button.addEventListener('click', async () => {
         button.disabled = true;
         try {
-          await apiRequest('/candidates/' + row.id, {
-            method: 'PATCH',
-            body: JSON.stringify({ active: false }),
+          const result = await apiRequest('/approvals', {
+            method: 'POST',
+            body: JSON.stringify({ action_type: 'candidate.set_active', candidate_id: row.id, active: false }),
           });
-          await loadCandidates();
+          showAlert('Request #' + result.approval.id + ' sent. A second delegate must approve it on the Approvals page.', 'success');
+          button.disabled = false;
         } catch (err) {
           showAlert(err.message, 'danger');
           button.disabled = false;
