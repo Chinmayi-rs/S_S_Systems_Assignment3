@@ -22,6 +22,9 @@ PERMISSIONS = {
     'ballot.cast': {ROLE_VOTER},
     'audit.read': {ROLE_AUDITOR},
     'results.preview': {ROLE_DELEGATE, ROLE_AUDITOR},
+    'approval.propose': {ROLE_DELEGATE},
+    'approval.decide': {ROLE_DELEGATE},
+    'approval.read': {ROLE_DELEGATE, ROLE_AUDITOR},
 }
 
 

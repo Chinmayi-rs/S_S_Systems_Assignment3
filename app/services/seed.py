@@ -4,8 +4,26 @@ from app.models.election import Election
 from app.models.user import User
 
 
+def ensure_second_delegate():
+    """GR-14 needs two different delegates. Safe to run on an existing database."""
+    if User.query.filter_by(username='delegate2').first():
+        return
+    db.session.add(User(
+        username='delegate2',
+        email='delegate2@example.test',
+        password='delegate21234',
+        full_name='Marcus Reyes',
+        role='commissioner_delegate',
+        date_of_birth='1981-03-14',
+        address='Parliament precinct',
+        division='Melbourne',
+    ))
+    db.session.commit()
+
+
 def seed_if_empty():
     if User.query.first():
+        ensure_second_delegate()
         return
 
     election = Election(
@@ -73,3 +91,4 @@ def seed_if_empty():
         ))
 
     db.session.commit()
+    ensure_second_delegate()

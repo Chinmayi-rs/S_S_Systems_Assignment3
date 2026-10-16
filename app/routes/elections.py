@@ -1,9 +1,6 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 
-from app import db
-from app.services.audit_log import append_audit
 from app.services.elections import current_election
-from app.utils.constants import ELECTION_CLOSED, ELECTION_OPEN
 from app.utils.helpers import json_error
 from app.utils.rbac import require_permission
 
@@ -21,19 +18,9 @@ def get_current():
 @elections_bp.route('/current/status', methods=['POST'])
 @require_permission('election.status')
 def set_status(current_user):
-    election = current_election()
-    if not election:
-        return json_error('No election is configured', 404)
-    data = request.get_json(silent=True) or {}
-    status = data.get('status')
-    if status not in (ELECTION_OPEN, ELECTION_CLOSED):
-        return json_error('Status must be open or closed', 400)
-    previous = election.status
-    election.status = status
-    append_audit(
-        'election.status',
-        f'{previous} -> {status}',
-        actor=current_user,
+    """GR-14: closing or reopening the poll affects the result, so it can no longer be done by one delegate."""
+    return json_error(
+        'Changing the poll status needs two delegates. Propose it with POST /api/approvals '
+        '(action_type "election.status"); a different delegate must approve it.',
+        409,
     )
-    db.session.commit()
-    return jsonify({'election': election.to_dict()}), 200

@@ -52,7 +52,8 @@ def create_app():
     def expired_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    from app.models import audit, ballot, candidate, election, signing, user  # noqa: F401
+    from app.models import approval, audit, ballot, candidate, election, signing, user  # noqa: F401
+    from app.routes.approvals import approvals_bp
     from app.routes.audit import audit_bp
     from app.routes.auth import auth_bp
     from app.routes.ballots import ballots_bp
@@ -70,6 +71,7 @@ def create_app():
     app.register_blueprint(ballots_bp, url_prefix='/api/ballots')
     app.register_blueprint(results_bp, url_prefix='/api/results')
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
+    app.register_blueprint(approvals_bp, url_prefix='/api/approvals')
 
     with app.app_context():
         db.create_all()
