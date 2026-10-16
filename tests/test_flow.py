@@ -107,7 +107,14 @@ def test_results_stay_hidden_until_close(client):
     denied = client.get('/api/audit', headers=voter)
     assert denied.status_code == 403
 
-    closed = client.post('/api/elections/current/status', json={'status': 'closed'}, headers=delegate)
+    # GR-14: one delegate cannot close the poll alone
+    direct = client.post('/api/elections/current/status', json={'status': 'closed'}, headers=delegate)
+    assert direct.status_code == 409
+    approver_id = client.get('/api/approvals/delegates', headers=delegate).get_json()['delegates'][0]['id']  # delegate2
+    proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': 'closed', 'approver_id': approver_id}, headers=delegate)
+    assert proposed.status_code == 201
+    second = login(client, 'delegate2', 'delegate21234')
+    closed = client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
     assert closed.status_code == 200
     published = client.get('/api/results')
     assert published.status_code == 200

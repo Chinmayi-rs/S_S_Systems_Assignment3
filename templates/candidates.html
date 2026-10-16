@@ -31,6 +31,11 @@
         <button class="btn" type="submit">Save candidate</button>
     </form>
 </div>
+<div id="approver-box" class="card" style="margin-top: 1rem;" hidden>
+    <label for="candidate-approver">Send withdrawal and restore requests to</label>
+    <select id="candidate-approver"></select>
+    <p class="muted">Only this delegate can approve or reject the request. While a request is waiting, nobody can send another one for the same candidate.</p>
+</div>
 <div class="card" style="margin-top: 1rem;">
     <div class="table-wrap">
         <table>
@@ -44,5 +49,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/approver.js"></script>
 <script src="/static/js/candidates.js"></script>
 {% endblock %}

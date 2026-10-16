@@ -74,6 +74,13 @@ def update_candidate(current_user, candidate_id):
     if not candidate:
         return json_error('Candidate not found', 404)
     data = request.get_json(silent=True) or {}
+    # GR-14: withdrawing or restoring a candidate changes the result, so it needs two delegates.
+    if 'active' in data and bool(data['active']) != candidate.active:
+        return json_error(
+            'Withdrawing or restoring a candidate needs two delegates. Propose it with POST /api/approvals '
+            '(action_type "candidate.set_active"); a different delegate must approve it.',
+            409,
+        )
     before = candidate.to_dict()
     if 'name' in data and data['name']:
         candidate.name = data['name'].strip()
@@ -88,8 +95,6 @@ def update_candidate(current_user, candidate_id):
             candidate.ballot_order = int(data['ballot_order'])
         except (TypeError, ValueError):
             return json_error('Ballot order must be a number', 400)
-    if 'active' in data:
-        candidate.active = bool(data['active'])
     append_audit(
         'candidate.update',
         json.dumps({'id': candidate.id, 'before': before, 'after': candidate.to_dict()}),
