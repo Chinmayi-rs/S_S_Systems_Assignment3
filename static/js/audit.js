@@ -26,24 +26,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 document.addEventListener('DOMContentLoaded', () => {
-  const button = document.getElementById('verify-btn');
-  const output = document.getElementById('verify-result');
-  if (!button) return;
-  button.addEventListener('click', async () => {
-    output.textContent = 'Checking...';
+  const chainBtn = document.getElementById('verify-chain-btn');
+  const chainOut = document.getElementById('verify-chain-result');
+  const sigBtn = document.getElementById('verify-sig-btn');
+  const sigOut = document.getElementById('verify-sig-result');
+  if (!chainBtn || !sigBtn) return;
+
+  // GR-15: only the hash chain
+  chainBtn.addEventListener('click', async () => {
+    chainOut.textContent = 'Checking chain...';
     try {
       const result = await apiRequest('/audit/verify');
-      const sig = result.signatures || { valid: true, checked: 0, problems: [] };
-      if (!result.chain_valid) {
-        output.textContent = 'CHAIN BROKEN at entry #' + result.broken_at + ': ' + result.reason;
-      } else if (!sig.valid) {
-        output.textContent = 'Chain is intact, but SIGNATURE PROBLEM at entry #' + sig.problems[0].event_id + ': ' + sig.problems[0].reason;
-      } else {
-        output.textContent = 'Chain is intact. ' + result.entries + ' entries, head ' + result.head_hash
-          + '. ' + sig.checked + ' delegate actions, all signatures valid.';
-      }
+      chainOut.textContent = result.chain_valid
+        ? 'Chain is intact. ' + result.entries + ' entries, head ' + result.head_hash
+        : 'CHAIN BROKEN at entry #' + result.broken_at + ': ' + result.reason;
     } catch (err) {
-      output.textContent = err.message;
+      chainOut.textContent = err.message;
+    }
+  });
+
+  // GR-16: only the delegate signatures
+  sigBtn.addEventListener('click', async () => {
+    sigOut.textContent = 'Checking signatures...';
+    try {
+      const sig = (await apiRequest('/audit/verify')).signatures;
+      sigOut.textContent = sig.valid
+        ? sig.checked + ' delegate actions, all signatures valid.'
+        : 'SIGNATURE PROBLEM at entry #' + sig.problems[0].event_id + ': ' + sig.problems[0].reason
+          + ' (' + sig.problems.length + ' problem(s) in total)';
+    } catch (err) {
+      sigOut.textContent = err.message;
     }
   });
 });
