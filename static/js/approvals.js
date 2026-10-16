@@ -5,6 +5,9 @@ function describeApproval(row) {
   if (row.action_type === 'candidate.set_active') {
     return ['Candidate', (row.payload.active ? 'Restore' : 'Withdraw') + ' candidate #' + row.payload.candidate_id];
   }
+  if (row.action_type === 'results.release') {
+    return ['Publish results', 'Sign and publish the final results of election #' + row.payload.election_id];
+  }
   return [row.action_type, JSON.stringify(row.payload)];
 }
 

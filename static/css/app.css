@@ -327,3 +327,9 @@ th { font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; colo
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* GR-13: signed results */
+.sigbox .mono { word-break: break-all; }
+.sigbox .row { margin-top: 0.6rem; }
+.sig-ok { color: var(--ok); font-weight: 600; }
+.sig-bad { color: var(--danger); font-weight: 600; }
