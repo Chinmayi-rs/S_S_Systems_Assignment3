@@ -32,9 +32,12 @@ def login(client, username, password):
 
 
 def make_some_events(client):
+    # GR-14: poll changes need a proposer and a different approver
     delegate = login(client, 'delegate', 'delegate1234')
-    client.post('/api/elections/current/status', json={'status': 'closed'}, headers=delegate)
-    client.post('/api/elections/current/status', json={'status': 'open'}, headers=delegate)
+    second = login(client, 'delegate2', 'delegate21234')
+    for status in ('closed', 'open'):
+        proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': status}, headers=delegate)
+        client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
 
 
 def test_entries_are_chained_and_verify_is_valid(ctx):

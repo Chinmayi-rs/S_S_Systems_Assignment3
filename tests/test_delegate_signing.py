@@ -39,7 +39,9 @@ def login(client, username, password):
 def delegate_acts(client, headers=None):
     headers = headers or login(client, 'delegate', 'delegate1234')
     client.post('/api/candidates', json={'name': 'New One', 'party': 'Independent', 'chamber': 'house', 'ballot_order': 9}, headers=headers)
-    client.post('/api/elections/current/status', json={'status': 'closed'}, headers=headers)
+    proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': 'closed'}, headers=headers)
+    second = login(client, 'delegate2', 'delegate21234')
+    client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
     return headers
 
 
@@ -75,11 +77,7 @@ def test_every_delegate_action_is_signed_and_verifies(ctx):
 def test_each_delegate_has_an_individual_key(ctx):
     client, app, _, _ = ctx
     delegate_acts(client)
-    with app.app_context():
-        db.session.add(User(username='delegate2', email='d2@example.test', password='delegate2222',
-                            full_name='Second Delegate', role='commissioner_delegate'))
-        db.session.commit()
-    delegate_acts(client, login(client, 'delegate2', 'delegate2222'))
+    # delegate2 already signed the approval inside delegate_acts, so both delegates have a key now
     with app.app_context():
         keys = DelegateKey.query.all()
         assert len(keys) == 2 and keys[0].fingerprint != keys[1].fingerprint
@@ -143,7 +141,8 @@ def test_swapped_public_key_is_detected(ctx):
     import hashlib
     fake = Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     raw_edit(identity, [
-        f"UPDATE delegate_keys SET public_key = '{base64.b64encode(fake).decode()}', fingerprint = '{hashlib.sha256(fake).hexdigest()}'"
+        f"UPDATE delegate_keys SET public_key = '{base64.b64encode(fake).decode()}', fingerprint = '{hashlib.sha256(fake).hexdigest()}' "
+        "WHERE user_id = (SELECT id FROM users WHERE username = 'delegate')"
     ])
     result = verify(client)
     assert result['signatures']['valid'] is False
@@ -176,7 +175,7 @@ def test_third_party_can_verify_one_action_offline(ctx):
     script = os.path.join(ROOT, 'scripts', 'verify_proof.py')
 
     ok = subprocess.run([sys.executable, script, path], capture_output=True, text=True)
-    assert ok.returncode == 0 and 'delegate "delegate"' in ok.stdout
+    assert ok.returncode == 0 and 'delegate "delegate2"' in ok.stdout  # delegate2 approved, so delegate2 signed the execution
 
     forged = proof.get_json()
     forged['event']['detail'] = 'closed -> open'
