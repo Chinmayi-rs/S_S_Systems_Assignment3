@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.models.audit import AuditEvent
+from app.services.audit_chain import verify_chain
 from app.utils.rbac import require_permission
 
 audit_bp = Blueprint('audit', __name__)
@@ -18,3 +19,11 @@ def list_events(current_user):
         AuditEvent.query.order_by(AuditEvent.id.desc()).limit(limit).all()
     )
     return jsonify({'events': [event.to_dict() for event in events]}), 200
+
+
+@audit_bp.route('/verify', methods=['GET'], strict_slashes=False)
+@require_permission('audit.read')
+def verify(current_user):
+    """Read-only integrity check of the whole chain (GR-15)."""
+    events = AuditEvent.query.order_by(AuditEvent.id.asc()).all()
+    return jsonify(verify_chain(events)), 200

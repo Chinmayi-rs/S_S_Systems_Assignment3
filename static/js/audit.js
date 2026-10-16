@@ -24,3 +24,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 });
+document.addEventListener('DOMContentLoaded', () => {
+  const button = document.getElementById('verify-btn');
+  const output = document.getElementById('verify-result');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    output.textContent = 'Checking...';
+    try {
+      const result = await apiRequest('/audit/verify');
+      output.textContent = result.valid
+        ? 'Chain is intact. ' + result.entries + ' entries, head ' + result.head_hash
+        : 'CHAIN BROKEN at entry #' + result.broken_at + ': ' + result.reason;
+    } catch (err) {
+      output.textContent = err.message;
+    }
+  });
+});
