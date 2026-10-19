@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 
+import pyotp
 import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -19,6 +20,7 @@ from app.models.approval import PendingApproval
 from app.models.audit import AuditEvent
 from app.models.published_result import PublishedResult, ResultsKey
 from app.services import results_publication
+from app.services.seed import deterministic_totp_secret
 
 SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts', 'verify_results.py')
 
@@ -44,7 +46,9 @@ def ctx():
 
 
 def login(client, username, password):
-    res = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    res = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert res.status_code == 200
     return {'Authorization': 'Bearer ' + res.get_json()['access_token']}
 

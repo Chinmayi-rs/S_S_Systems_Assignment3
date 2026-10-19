@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 
+import pyotp
 import pytest
 
 from app import create_app, db
@@ -12,6 +13,7 @@ from app.models.audit import AuditEvent
 from app.models.signing import ActionSignature, DelegateKey
 from app.models.user import User
 from app.services.audit_chain import compute_hash
+from app.services.seed import deterministic_totp_secret
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,7 +33,9 @@ def ctx():
 
 
 def login(client, username, password):
-    res = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    res = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert res.status_code == 200
     return {'Authorization': 'Bearer ' + res.get_json()['access_token']}
 
