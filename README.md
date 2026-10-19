@@ -95,9 +95,12 @@ Two SQLite files stand in for the two databases:
 | GET, PATCH | /api/enrolment/me | signed in / voter |
 | GET | /api/enrolment/voters | enrolment officer |
 | POST | /api/enrolment/voters/{id}/verify | enrolment officer |
+| GET | /api/auth/permissions | signed in; the caller's role and its allowed permissions |
 | GET | /api/candidates | public |
 | POST | /api/candidates | delegate |
 | PATCH | /api/candidates/{id} | delegate |
+| POST | /api/candidates/reorder | delegate, body `{ "chamber", "order": [all ids of that chamber, new order] }` |
+| DELETE | /api/candidates/{id} | delegate, always 405: deletion does not exist, withdrawal is the GR-14 approval flow |
 | GET | /api/elections/current | public |
 | POST | /api/elections/current/status | delegate, body `{ "status": "open" \| "closed" }` |
 | GET | /api/ballots/status | voter |
@@ -118,8 +121,8 @@ Not built yet. Do not treat the notes below as the implementation.
 | --- | --- |
 | GR-01 | Done: Argon2id in `models/user.py`, TOTP + lockout + attempt log in `routes/auth.py`, enrolment UI at `/mfa-setup` (see below). |
 | GR-02 | Done: `models/session.py` + `services/sessions.py`; the blocklist hook in `app/__init__.py` idle-expires every endpoint (see below). |
-| GR-03 | `PERMISSIONS` in `utils/rbac.py`. Routes already call `require_permission`. |
-| GR-04 | `routes/candidates.py` already writes an audit row with before/after. |
+| GR-03 | Done: deny-by-default `PERMISSIONS` map in `utils/rbac.py`, audited denials, `/api/auth/permissions`, and a test that walks every API route (see below). |
+| GR-04 | Done: delegate-only create/update/reorder with before/after audit rows, input bounds, and deletion explicitly refused (see below). |
 | GR-05 | `services/ballot_box.py` `issue_token` and `commit_ballot`, together with `users.has_voted`. |
 | GR-06 | Token hash split is already the shape. Still need unlinkability review. |
 | GR-07 | `services/audit_log.py`. Ballot commit already omits actor and preferences. |
@@ -136,6 +139,31 @@ Not built yet. Do not treat the notes below as the implementation.
 | GR-18 | `date_of_birth` and `address` on `User` are still plaintext. |
 | GR-19 | `tests/test_flow.py` is the start. CI workflow is not added. |
 | GR-20 | `commit` returns a reference id, not a hash of ciphertext. |
+
+## GR-03 Role-based access control (deny by default)
+
+- One reviewed map (`PERMISSIONS` in `app/utils/rbac.py`) decides who may do
+  what. Routes declare a permission name, never a role, so a permission that
+  is not in the map denies **everyone** - a typo fails closed.
+- Denied attempts by signed-in users are written to the GR-15 audit chain as
+  `rbac.denied` (actor, role and the permission they tried).
+- `GET /api/auth/permissions` returns the caller's role and allowed
+  permissions straight from the real map.
+- `tests/test_rbac.py` walks the live routing table and asserts every `/api`
+  endpoint outside a short public list answers 401 to anonymous callers, and
+  checks a role-by-endpoint matrix for all four roles.
+
+## GR-04 Secure candidate management
+
+- Create, update and ballot reordering are delegate-only (via GR-03) and every
+  change writes actor, timestamp and before/after values to the audit chain
+  (`candidate.create`, `candidate.update`, `candidate.reorder`).
+- `POST /api/candidates/reorder` must list every candidate of the chamber
+  exactly once, so a reorder can never drop or smuggle in a candidate.
+- `DELETE` is refused by design (405): deletion would erase audit context;
+  withdrawing a candidate is the GR-14 two-delegate approval flow.
+- Free-text fields are length-bounded so the admin screen cannot stuff junk
+  into what every voter's ballot renders.
 
 ## GR-01 Password + TOTP sign-in, lockout
 
