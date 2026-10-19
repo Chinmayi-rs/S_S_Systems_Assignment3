@@ -1,7 +1,7 @@
 from functools import wraps
 
 from flask import jsonify
-from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required, verify_jwt_in_request
 
 from app.models.user import User
 from app.utils.constants import (
@@ -29,6 +29,10 @@ PERMISSIONS = {
 
 
 def _active_user():
+    # GR-01: the provisional MFA-enrolment token is not a signed-in session.
+    # It can only reach the /api/auth/mfa/* endpoints below.
+    if get_jwt().get('scope') == 'mfa_setup':
+        return None
     identity = get_jwt_identity()
     if identity is None:
         return None
@@ -68,6 +72,26 @@ def require_permission(permission):
     return decorator
 
 
+def require_mfa_setup_token(fn):
+    """GR-01: for the MFA enrolment endpoints only.
+
+    Accepts the short-lived mfa_setup token (new accounts finishing
+    enrolment) as well as a full session, but still demands a valid JWT
+    and an active account.
+    """
+
+    @wraps(fn)
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        identity = get_jwt_identity()
+        user = User.query.get(int(identity)) if identity else None
+        if not user or not user.is_active:
+            return jsonify({'error': 'Access denied'}), 403
+        return fn(*args, current_user=user, **kwargs)
+
+    return wrapper
+
+
 def optional_user():
     try:
         verify_jwt_in_request(optional=True)
@@ -76,7 +100,4 @@ def optional_user():
     identity = get_jwt_identity()
     if not identity:
         return None
-    user = User.query.get(int(identity))
-    if not user or not user.is_active:
-        return None
-    return user
+    return _active_user()

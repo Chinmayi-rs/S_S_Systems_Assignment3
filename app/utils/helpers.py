@@ -1,4 +1,16 @@
+import base64
+import io
+
+import qrcode
 from flask import jsonify
+
+
+def qr_data_uri(text):
+    """PNG QR code as a data URI, for the TOTP enrolment screen (GR-01)."""
+    image = qrcode.make(text)
+    buffer = io.BytesIO()
+    image.save(buffer)
+    return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
 
 
 def json_error(message, status):
