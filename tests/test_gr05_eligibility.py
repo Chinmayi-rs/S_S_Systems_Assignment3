@@ -165,3 +165,87 @@ def test_duplicate_vote(client):
         headers=headers
     )
     assert new_token.status_code == 409
+
+# GR-06: Test that an invalid ballot token is rejected
+def test_invalid_ballot_token(client):
+    headers = login(client)
+
+    # Generate an invalid token
+    invalid_token = "invalid-token-12345"
+
+    # Attempt to stage a ballot using the invalid token
+    response = client.post(
+        "/api/ballots/stage",
+        json={
+            "token": invalid_token,
+            "house": [1, 2, 3],
+            "senate_party": "Invalid"
+        },
+        headers=headers
+    )
+
+    # Invalid tokens must be rejected
+    assert response.status_code == 409
+
+
+
+# GR-06: Test that a ballot token cannot be reused
+def test_reused_ballot_token(client):
+    headers = login(client)
+
+    # Retrieve valid candidates
+    response = client.get("/api/candidates")
+    candidates = response.get_json()["candidates"]
+
+    house = [
+        candidate["id"]
+        for candidate in candidates
+        if candidate["chamber"] == "house"
+    ]
+
+    senate = next(
+        candidate["party"]
+        for candidate in candidates
+        if candidate["chamber"] == "senate"
+    )
+
+    # Request a ballot token
+    issued = client.post(
+        "/api/ballots/issue",
+        headers=headers
+    )
+
+    assert issued.status_code == 201
+    token = issued.get_json()["token"]
+
+    # Stage the ballot
+    staged = client.post(
+        "/api/ballots/stage",
+        json={
+            "token": token,
+            "house": house,
+            "senate_party": senate
+        },
+        headers=headers
+    )
+
+    assert staged.status_code == 200
+
+    # Submit the ballot for the first time
+    first_vote = client.post(
+        "/api/ballots/commit",
+        json={"token": token},
+        headers=headers
+    )
+
+    assert first_vote.status_code == 201
+
+    # Attempt to submit the same token again
+    second_vote = client.post(
+        "/api/ballots/commit",
+        json={"token": token},
+        headers=headers
+    )
+
+    # Reusing the token must be rejected
+    assert second_vote.status_code == 409

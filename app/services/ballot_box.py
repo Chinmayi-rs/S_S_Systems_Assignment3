@@ -85,6 +85,8 @@ def issue_token(user):
             voter_id=user.id, election_id=election.id, status='issued'
         ).update({'status': 'expired'})
     )
+    # GR-06: Generate a cryptographically secure, random
+    # one-time ballot token using 256 bits of randomness.
     raw = secrets.token_urlsafe(32)
     record = BallotToken(
         election_id=election.id,
@@ -182,7 +184,12 @@ def commit_ballot(user, raw_token):
         return None, error
     if user.has_voted:
         return None, ('A ballot has already been accepted for this voter', 409)
-    staged = Ballot.query.filter_by(token_hash=record.token_hash, status='staged').first()
+    # GR-06: Only accept a staged ballot for the current election
+    staged = Ballot.query.filter_by(
+        token_hash=record.token_hash,
+        election_id=election.id,
+        status='staged'
+).first()
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
