@@ -3,6 +3,8 @@ import json
 import secrets
 import uuid
 from datetime import datetime
+from sqlalchemy import update
+from app.models.user import User
 
 from app import db
 from app.models.ballot import Ballot, BallotToken
@@ -56,6 +58,9 @@ def voter_status(user):
 def _eligibility_error(user, election):
     if user.role != 'voter':
         return 'Only an enrolled voter can request a ballot', 403
+
+    if not user.is_active:
+        return "Voter account is inactive", 403
     if election.status != 'open':
         return 'This election is not open for voting', 409
     if not user.enrolled or not user.eligible:
@@ -181,9 +186,20 @@ def commit_ballot(user, raw_token):
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
-    # Identity flag and ballot row commit together through one session.
-    # GR-05 should tighten this with a row lock when the database is Postgres.
-    user.has_voted = True
+    # GR-05: Atomically mark the voter as having voted.
+    # Only succeeds if has_voted is currently False.
+    result = db.session.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.has_voted.is_(False)
+        )
+        .values(has_voted=True)
+    )
+
+    if result.rowcount != 1:
+        db.session.rollback()
+        return None, ("Already voted", 409)
     record.status = 'used'
     record.used_at = datetime.utcnow()
     staged.status = 'committed'
