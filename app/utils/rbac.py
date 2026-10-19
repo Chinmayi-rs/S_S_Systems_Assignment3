@@ -11,8 +11,10 @@ from app.utils.constants import (
     ROLE_VOTER,
 )
 
-# Single place for who may do what. GR-03 grows this map; routes should not
-# hard-code roles of their own.
+# GR-03: the single place for who may do what. Routes never hard-code roles;
+# they declare a permission and this map decides. A permission that is not
+# listed here is denied for every role (deny by default), so a typo in a
+# route fails closed, never open.
 PERMISSIONS = {
     'enrolment.review': {ROLE_OFFICER},
     'enrolment.verify': {ROLE_OFFICER},
@@ -54,6 +56,25 @@ def require_login(fn):
     return wrapper
 
 
+def permissions_for_role(role):
+    """GR-03: every permission the map grants to this role."""
+    return sorted(name for name, allowed in PERMISSIONS.items() if role in allowed)
+
+
+def _audit_denial(user, permission):
+    """GR-03: a signed-in user crossing a role boundary is security signal,
+    so it lands in the GR-15 audit chain for the auditor to see."""
+    from app import db
+    from app.services.audit_log import append_audit
+
+    append_audit(
+        'rbac.denied',
+        f'{user.username} ({user.role}) was denied permission {permission}',
+        actor=None,  # system event; the subject is named in the detail
+    )
+    db.session.commit()
+
+
 def require_permission(permission):
     def decorator(fn):
         @wraps(fn)
@@ -64,6 +85,7 @@ def require_permission(permission):
                 return jsonify({'error': 'Access denied'}), 403
             allowed = PERMISSIONS.get(permission, set())
             if user.role not in allowed:
+                _audit_denial(user, permission)
                 return jsonify({'error': 'You do not have permission for this action'}), 403
             return fn(*args, current_user=user, **kwargs)
 

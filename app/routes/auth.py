@@ -10,7 +10,7 @@ from app.services.audit_log import append_audit
 from app.services.sessions import issue_mfa_setup_token, issue_session_token, revoke_session
 from app.utils.constants import ROLES
 from app.utils.helpers import json_error, qr_data_uri, validate_required_fields
-from app.utils.rbac import require_login, require_mfa_setup_token
+from app.utils.rbac import permissions_for_role, require_login, require_mfa_setup_token
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -215,6 +215,17 @@ def mfa_enable(current_user):
 @require_login
 def profile(current_user):
     return jsonify({'user': current_user.to_dict()}), 200
+
+
+@auth_bp.route('/permissions', methods=['GET'])
+@require_login
+def my_permissions(current_user):
+    # GR-03: lets the front end (and the demo) show exactly what the
+    # signed-in role may do, straight from the real permission map.
+    return jsonify({
+        'role': current_user.role,
+        'permissions': permissions_for_role(current_user.role),
+    }), 200
 
 
 @auth_bp.route('/logout', methods=['POST'])
