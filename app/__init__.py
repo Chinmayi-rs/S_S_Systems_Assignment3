@@ -28,8 +28,14 @@ def create_app():
 
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
-    # Fixed lifetime for the skeleton. GR-02 replaces this with a 15-minute idle timeout.
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=int(os.environ.get('JWT_MINUTES', '60')))
+    # GR-02: the JWT lifetime is only an absolute cap. The effective limit is
+    # the inactivity window checked against user_sessions on every request.
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=int(os.environ.get('JWT_MAX_HOURS', '12')))
+    app.config['SESSION_IDLE_MINUTES'] = int(os.environ.get('SESSION_IDLE_MINUTES', '15'))
+    app.config['MFA_SETUP_TOKEN_MINUTES'] = int(os.environ.get('MFA_SETUP_TOKEN_MINUTES', '10'))
+    # GR-01: lock the account for 15 minutes after 5 consecutive failures.
+    app.config['LOGIN_LOCKOUT_THRESHOLD'] = int(os.environ.get('LOGIN_LOCKOUT_THRESHOLD', '5'))
+    app.config['LOGIN_LOCKOUT_MINUTES'] = int(os.environ.get('LOGIN_LOCKOUT_MINUTES', '15'))
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('IDENTITY_DATABASE_URL', identity_default)
     app.config['SQLALCHEMY_BINDS'] = {
         'ballot': os.environ.get('BALLOT_DATABASE_URL', ballot_default),
@@ -52,7 +58,18 @@ def create_app():
     def expired_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    from app.models import approval, audit, ballot, candidate, election, published_result, signing, user  # noqa: F401
+    # GR-02: every verified token is checked against the session table, so an
+    # idle or revoked session is rejected on every endpoint, not per-route.
+    @jwt.token_in_blocklist_loader
+    def token_blocked(jwt_header, jwt_payload):
+        from app.services.sessions import session_is_blocked
+        return session_is_blocked(jwt_payload)
+
+    @jwt.revoked_token_loader
+    def revoked_token(header, payload):
+        return jsonify({'error': 'Session expired. Sign in again.'}), 401
+
+    from app.models import approval, audit, ballot, candidate, election, published_result, session, signing, user  # noqa: F401
     from app.routes.approvals import approvals_bp
     from app.routes.audit import audit_bp
     from app.routes.auth import auth_bp
