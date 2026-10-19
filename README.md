@@ -23,19 +23,34 @@ pytest
 
 ## Seeded desks
 
-| Username | Password | Role |
-| --- | --- | --- |
-| voter | voter1234 | Eligible voter, division of Melbourne |
-| pending | voter1234 | Voter, not verified yet |
-| officer | officer1234 | Enrolment officer |
-| delegate | delegate1234 | Commissioner's delegate |
-| delegate2 | delegate21234 | Second commissioner's delegate (two-person approvals) |
-| auditor | auditor1234 | Auditor |
+Every account signs in with a password **and** a 6-digit TOTP code (GR-01).
+Seeded accounts come with the second factor already enrolled; add the secret
+below to any authenticator app (Google Authenticator, Aegis, 1Password, or
+`oathtool --totp -b <secret>` on the command line) to get codes.
+
+| Username | Password | TOTP secret | Role |
+| --- | --- | --- | --- |
+| voter | voter1234 | `F3JDIRDOT2NPZNQD77RM6MG46LP6TEEN` | Eligible voter, division of Melbourne |
+| pending | voter1234 | `QQUXICP2GWC4UT265ASHG5VBAJTMBQ4I` | Voter, not verified yet |
+| officer | officer1234 | `372NDDK6FFEQHLLAP2SNX5BBVTX5XHCX` | Enrolment officer |
+| delegate | delegate1234 | `6XJJFZNCSXNGL7B5ZUWDATKXVBBAADXR` | Commissioner's delegate |
+| delegate2 | delegate21234 | `4KP7JD73VZVYRP2NRQN5WCKLNQNHRPRB` | Second commissioner's delegate (two-person approvals) |
+| auditor | auditor1234 | `K2B27OBNXWQSCU6EJOM76DE3TW3PYSQS` | Auditor |
+
+Accounts registered through the UI enrol their own authenticator with a QR
+code before their first session exists. To demo that flow, just register a
+new voter.
 
 Sign out before switching accounts. The token lives in the browser's local storage.
 
+**Upgrading an existing checkout:** GR-01/GR-02 added columns and a table.
+Delete `data/identity.db` (or the Docker tmpfs restarts clean anyway) so
+`db.create_all()` rebuilds the schema.
+
 ## What already works
 
+- Sign-in needs a password (Argon2id-hashed) plus an authenticator code; five consecutive failures lock the account for 15 minutes (GR-01).
+- Sessions die after 15 minutes of inactivity and on sign-out, server-side, on every endpoint (GR-02).
 - Register a voter (not eligible until an officer verifies them).
 - Update address and division until a ballot is accepted.
 - Officer verifies a voter onto the Melbourne roll.
@@ -71,9 +86,11 @@ Two SQLite files stand in for the two databases:
 
 | Method | Path | Who |
 | --- | --- | --- |
-| POST | /api/auth/register | public, voters only |
-| POST | /api/auth/login | public |
-| POST | /api/auth/logout | signed in |
+| POST | /api/auth/register | public, voters only; returns a provisional token for MFA enrolment |
+| POST | /api/auth/login | public, body `{ "username", "password", "totp_code" }`; without `totp_code` it answers `mfa_required` |
+| POST | /api/auth/mfa/setup | provisional or signed in; returns TOTP secret, otpauth URI and QR data URI |
+| POST | /api/auth/mfa/enable | provisional, body `{ "totp_code" }`; verifies the code and starts the first full session |
+| POST | /api/auth/logout | signed in; revokes the session server-side |
 | GET | /api/auth/profile | signed in |
 | GET, PATCH | /api/enrolment/me | signed in / voter |
 | GET | /api/enrolment/voters | enrolment officer |
@@ -99,8 +116,8 @@ Not built yet. Do not treat the notes below as the implementation.
 
 | ID | Extend |
 | --- | --- |
-| GR-01 | `User.set_password` / `check_password` and `routes/auth.py` login. Add TOTP, lockout, attempt log. |
-| GR-02 | `JWT_ACCESS_TOKEN_EXPIRES` in `app/__init__.py`, plus an idle check in `utils/rbac.py`. |
+| GR-01 | Done: Argon2id in `models/user.py`, TOTP + lockout + attempt log in `routes/auth.py`, enrolment UI at `/mfa-setup` (see below). |
+| GR-02 | Done: `models/session.py` + `services/sessions.py`; the blocklist hook in `app/__init__.py` idle-expires every endpoint (see below). |
 | GR-03 | `PERMISSIONS` in `utils/rbac.py`. Routes already call `require_permission`. |
 | GR-04 | `routes/candidates.py` already writes an audit row with before/after. |
 | GR-05 | `services/ballot_box.py` `issue_token` and `commit_ballot`, together with `users.has_voted`. |
@@ -120,7 +137,38 @@ Not built yet. Do not treat the notes below as the implementation.
 | GR-19 | `tests/test_flow.py` is the start. CI workflow is not added. |
 | GR-20 | `commit` returns a reference id, not a hash of ciphertext. |
 
-Passwords are bcrypt, matching the banking template, until GR-01 switches them to Argon2.
+## GR-01 Password + TOTP sign-in, lockout
+
+- Passwords are hashed with **Argon2id** (`argon2-cffi`). Hashes created before
+  this change (bcrypt, from the banking template) still verify and are upgraded
+  to Argon2 in place on the next successful sign-in.
+- Every account has a **TOTP second factor** (`pyotp`). Sign-in is two steps:
+  the password alone only earns the code prompt (`mfa_required`), never a token.
+- An account that has not enrolled an authenticator yet gets a **provisional
+  token** (10 minutes, claim `scope=mfa_setup`) that can only call
+  `/api/auth/mfa/setup` and `/api/auth/mfa/enable`. The RBAC layer rejects it
+  everywhere else, so there is no session of any kind before both factors exist.
+  This is also what makes GR-02's "privileged users require MFA" hold: staff
+  cannot reach staff endpoints without finishing enrolment.
+- **Lockout:** 5 consecutive failures (wrong password or wrong code) lock the
+  account for 15 minutes. While locked, even the correct password + code gets
+  `423`. Configurable via `LOGIN_LOCKOUT_THRESHOLD` / `LOGIN_LOCKOUT_MINUTES`.
+- **Every attempt is logged** to the GR-15 audit chain: `auth.login`,
+  `auth.login_failed`, `auth.login_blocked`, `auth.lockout`, `auth.mfa_setup`,
+  `auth.mfa_enabled`, `auth.logout`.
+
+## GR-02 Sessions: 15-minute idle timeout, server-side revocation
+
+- Every full token is recorded in the `user_sessions` table, keyed by the JWT's
+  `jti`. flask-jwt-extended's blocklist hook checks that row on **every**
+  verified request, so no route can forget the check.
+- A request after more than `SESSION_IDLE_MINUTES` (default 15) of inactivity
+  marks the session revoked (`idle_timeout`) and answers 401. Activity slides
+  the window: each authenticated request refreshes `last_seen`.
+- Sign-out revokes the session row, so the JWT is dead even though its
+  signature is still valid. A forged-but-signed token without a session row is
+  rejected the same way.
+- The JWT's own expiry (`JWT_MAX_HOURS`, default 12) is only an absolute cap.
 
 ## GR-13 Signed publication of results
 
