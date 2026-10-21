@@ -51,6 +51,8 @@ Delete `data/identity.db` (or the Docker tmpfs restarts clean anyway) so
 
 - Sign-in needs a password (Argon2id-hashed) plus an authenticator code; five consecutive failures lock the account for 15 minutes (GR-01).
 - Sessions die after 15 minutes of inactivity and on sign-out, server-side, on every endpoint (GR-02).
+- Every API endpoint checks the caller's role against one deny-by-default permission map; denied attempts are audit-logged (GR-03).
+- Candidate create, update and ballot reordering are delegate-only with before/after audit rows; deletion is refused by design (GR-04).
 - Register a voter (not eligible until an officer verifies them).
 - Update address and division until a ballot is accepted.
 - Officer verifies a voter onto the Melbourne roll.
