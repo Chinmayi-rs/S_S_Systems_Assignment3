@@ -5,6 +5,7 @@ services:
       - "8080:8080"
     environment:
       PORT: "8080"
+      PII_ENCRYPTION_KEY: "${PII_ENCRYPTION_KEY:?Missing PII key}"
       SECRET_KEY: dev-secret-change-me
       JWT_SECRET_KEY: dev-jwt-secret-change-me
       IDENTITY_DATABASE_URL: sqlite:////app/data/identity.db
