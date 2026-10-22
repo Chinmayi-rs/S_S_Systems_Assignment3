@@ -60,7 +60,7 @@ def _eligibility_error(user, election):
         return 'Only an enrolled voter can request a ballot', 403
 
     if not user.is_active:
-        return "Voter account is inactive", 403
+        return 'Voter account is inactive', 403
     if election.status != 'open':
         return 'This election is not open for voting', 409
     if not user.enrolled or not user.eligible:
