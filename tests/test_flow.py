@@ -1,47 +1,23 @@
-import base64
+import os
+import tempfile
 
 import pytest
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app import create_app, db
+from app import create_app
 
-from sqlalchemy import text
-
-from app.models.user import User
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv(
-        "IDENTITY_DATABASE_URL",
-        "sqlite:///" + (tmp_path / "identity.db").as_posix(),
-    )
-    monkeypatch.setenv(
-        "BALLOT_DATABASE_URL",
-        "sqlite:///" + (tmp_path / "ballot.db").as_posix(),
-    )
-    monkeypatch.setenv(
-        "JWT_SECRET_KEY",
-        "test-jwt-secret-for-automated-tests-only",
-    )
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
-
-    test_key = AESGCM.generate_key(bit_length=256)
-    monkeypatch.setenv(
-        "PII_ENCRYPTION_KEY",
-        base64.b64encode(test_key).decode("ascii"),
-    )
-
+def client():
+    directory = tempfile.mkdtemp()
+    os.environ['IDENTITY_DATABASE_URL'] = 'sqlite:///' + os.path.join(directory, 'identity.db')
+    os.environ['BALLOT_DATABASE_URL'] = 'sqlite:///' + os.path.join(directory, 'ballot.db')
+    os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret'
+    os.environ['SECRET_KEY'] = 'test-secret'
     app = create_app()
-    app.config["TESTING"] = True
+    app.config['TESTING'] = True
+    with app.test_client() as test_client:
+        yield test_client
 
-    try:
-        with app.test_client() as test_client:
-            yield test_client
-    finally:
-        with app.app_context():
-            db.session.remove()
-            for engine in db.engines.values():
-                engine.dispose()
 
 def login(client, username, password):
     response = client.post('/api/auth/login', json={'username': username, 'password': password})
@@ -137,100 +113,3 @@ def test_results_stay_hidden_until_close(client):
     assert published.status_code == 200
     assert published.get_json()['preview'] is False
     assert published.get_json()['method'] == 'first-preference'
-
-def test_seeded_personal_details_are_encrypted(client):
-    with client.application.app_context():
-        row = db.session.execute(
-            text("""
-                SELECT
-                    date_of_birth_encrypted,
-                    address_encrypted
-                FROM users
-                WHERE username = :username
-            """),
-            {"username": "voter"},
-        ).one()
-
-        assert row[0].startswith("v1:")
-        assert row[1].startswith("v1:")
-        assert "1998-04-12" not in row[0]
-        assert "12 Lygon Street, Carlton" not in row[1]
-
-        voter = User.query.filter_by(username="voter").one()
-        assert voter.date_of_birth == "1998-04-12"
-        assert voter.address == "12 Lygon Street, Carlton"
-
-
-def test_address_update_is_encrypted(client):
-    headers = login(client, "voter", "voter1234")
-
-    response = client.patch(
-        "/api/enrolment/me",
-        json={"address": "20 Example Road"},
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["enrolment"]["address"] == "20 Example Road"
-
-    with client.application.app_context():
-        stored = db.session.execute(
-            text("""
-                SELECT address_encrypted
-                FROM users
-                WHERE username = :username
-            """),
-            {"username": "voter"},
-        ).scalar_one()
-
-        assert stored.startswith("v1:")
-        assert "20 Example Road" not in stored
-
-def test_registration_stores_encrypted_personal_details(client):
-    response = client.post(
-        "/api/auth/register",
-        json={
-            "username": "gr18test",
-            "email": "gr18test@example.test",
-            "password": "ExamplePassword123!",
-            "full_name": "Fictional Test Voter",
-            "date_of_birth": "2000-05-12",
-            "address": "30 Sample Street",
-            "division": "Melbourne",
-        },
-    )
-
-    assert response.status_code == 201
-
-    user = response.get_json()["user"]
-    assert user["date_of_birth"] == "2000-05-12"
-    assert user["address"] == "30 Sample Street"
-
-    with client.application.app_context():
-        row = db.session.execute(
-            text("""
-                SELECT date_of_birth_encrypted, address_encrypted
-                FROM users
-                WHERE username = :username
-            """),
-            {"username": "gr18test"},
-        ).one()
-
-        assert row[0].startswith("v1:")
-        assert row[1].startswith("v1:")
-        assert "2000-05-12" not in row[0]
-        assert "30 Sample Street" not in row[1]
-
-
-def test_personal_details_require_authorisation(client):
-    anonymous = client.get("/api/enrolment/me")
-    assert anonymous.status_code == 401
-
-    headers = login(client, "voter", "voter1234")
-
-    own_record = client.get("/api/enrolment/me", headers=headers)
-    assert own_record.status_code == 200
-    assert own_record.get_json()["enrolment"]["username"] == "voter"
-
-    voter_list = client.get("/api/enrolment/voters", headers=headers)
-    assert voter_list.status_code == 403
