@@ -1,3 +1,6 @@
+import uuid
+from flask import current_app
+
 from datetime import datetime
 
 import bcrypt
@@ -15,8 +18,21 @@ class User(db.Model):
     full_name = db.Column(db.String(120), nullable=False)
     # voter | enrolment_officer | commissioner_delegate | auditor
     role = db.Column(db.String(40), nullable=False, default='voter')
-    date_of_birth = db.Column(db.String(10))
-    address = db.Column(db.String(240))
+    
+    pii_context_id = db.Column(
+        db.String(36),
+        unique=True,
+        nullable=False,
+    )
+    _date_of_birth_encrypted = db.Column(
+        "date_of_birth_encrypted",
+        db.Text,
+    )
+    _address_encrypted = db.Column(
+        "address_encrypted",
+        db.Text,
+    )
+    
     division = db.Column(db.String(80))
     enrolled = db.Column(db.Boolean, default=False, nullable=False)
     eligible = db.Column(db.Boolean, default=False, nullable=False)
@@ -31,12 +47,67 @@ class User(db.Model):
         self.email = email
         self.full_name = full_name
         self.role = role
+        self.pii_context_id = str(uuid.uuid4())
         self.date_of_birth = date_of_birth
         self.address = address
         self.division = division
         self.enrolled = enrolled
         self.eligible = eligible
         self.set_password(password)
+
+    def _pii_context(self, field):
+        if not self.pii_context_id:
+            raise RuntimeError("User encryption context is missing.")
+
+        return f"voter:{self.pii_context_id}:{field}"
+
+    def _encrypt_pii(self, value, field):
+        if value is None:
+            return None
+
+        cipher = current_app.extensions["pii_cipher"]
+        return cipher.encrypt(
+            value,
+            context=self._pii_context(field),
+        )
+
+    def _decrypt_pii(self, value, field):
+        if value is None:
+            return None
+
+        cipher = current_app.extensions["pii_cipher"]
+        return cipher.decrypt(
+            value,
+            context=self._pii_context(field),
+        )
+
+    @property
+    def date_of_birth(self):
+        return self._decrypt_pii(
+            self._date_of_birth_encrypted,
+            "date_of_birth",
+        )
+
+    @date_of_birth.setter
+    def date_of_birth(self, value):
+        self._date_of_birth_encrypted = self._encrypt_pii(
+            value,
+            "date_of_birth",
+        )
+
+    @property
+    def address(self):
+        return self._decrypt_pii(
+            self._address_encrypted,
+            "address",
+        )
+
+    @address.setter
+    def address(self, value):
+        self._address_encrypted = self._encrypt_pii(
+            value,
+            "address",
+        )
 
     def set_password(self, password):
         # GR-01: swap bcrypt for Argon2.
