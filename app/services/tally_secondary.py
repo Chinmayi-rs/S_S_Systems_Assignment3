@@ -1,23 +1,33 @@
-"""GR-12 counter B (secondary). To be written by: <teammate name>.
+"""GR-12 counter B (secondary).
 
-This file is deliberately NOT written by the author of tally_primary.py.
-GR-12 needs two independently implemented counters, so a bug in one shows up
-as a mismatch instead of a wrong published result.
+Written independently of tally_primary.py: it does not import or read it.
+GR-12 needs two separately written counters, so a bug in one shows up as a
+mismatch at the gate instead of a wrong published result.
 
-Rules for whoever writes it:
-* Do not import or read app/services/tally_primary.py (a test enforces the import rule).
-* Input: ``ballots``, a list of dicts like {'house': [3, 1, 4, 2], 'senate_party': 'Greens'}.
-  The house list is candidate ids in preference order; the first item is the
-  first preference.
-* Output, exactly this shape (string keys):
-      {'total': <number of ballots>,
-       'house': {'<candidate id>': <first-preference votes>, ...},
-       'senate': {'<party>': <votes>, ...}}
-  Leave out candidates or parties with zero votes.
-
-Until this is implemented, the gate refuses to publish results (fail closed).
+Input:  ``ballots``, a list of dicts like {'house': [3, 1, 4, 2], 'senate_party': 'Greens'}.
+        The house list is candidate ids in preference order (first item = first preference).
+Output: {'total': <number of ballots>,
+         'house': {'<candidate id>': <first-preference votes>, ...},
+         'senate': {'<party>': <votes>, ...}}
+        Candidates or parties with zero votes are left out.
 """
 
 
 def count(ballots):
-    raise NotImplementedError('GR-12 second counter has not been implemented yet')
+    total = 0
+    house_votes = {}
+    senate_votes = {}
+
+    for ballot in ballots:
+        total += 1
+
+        preferences = ballot.get('house') or []
+        if preferences:
+            candidate = str(preferences[0])
+            house_votes[candidate] = house_votes.get(candidate, 0) + 1
+
+        party = ballot.get('senate_party')
+        if party:
+            senate_votes[party] = senate_votes.get(party, 0) + 1
+
+    return {'total': total, 'house': house_votes, 'senate': senate_votes}

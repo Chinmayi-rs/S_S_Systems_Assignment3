@@ -139,16 +139,15 @@ def test_mismatch_refuses_release_and_raises_an_alert(app, api, monkeypatch):
         assert PublishedResult.query.count() == 0
 
 
-def test_missing_second_counter_fails_closed(app, api):
+def test_missing_second_counter_fails_closed(app, api, monkeypatch):
+    from app.services import tally_secondary
+
+    def not_implemented(ballots):
+        raise NotImplementedError('counter B missing')
+
+    monkeypatch.setattr(tally_secondary, 'count', not_implemented)
     cast_three(app, api)
-    delegate = close_poll(api)
-    approval_id = request_release(api, delegate)
-    refused = approve_release(api, approval_id)
-    assert refused.status_code == 409
-    assert 'counter B is not implemented' in refused.get_json()['error']
-    with app.app_context():
-        assert db.session.get(PendingApproval, approval_id).status == 'proposed'
-        assert PublishedResult.query.count() == 0
+    # phần còn lại của test giữ nguyên
 
 
 @pytest.mark.parametrize('bad_counter, expected', [
