@@ -1,16 +1,16 @@
 """The only module that reads or writes the ballot database.
 
-  ballot_box (voter journey) calls stage / commit here; the tally reads through
-  ``read_verified_ballots``. Keeping every ballot-table access in one place means
-  the encryption (GR-09) and signature (GR-10) rules cannot be skipped by another
-  route.
+ballot_box (voter journey) calls stage / commit here; the tally reads through
+``read_verified_ballots``. Keeping every ballot-table access in one place means
+the encryption (GR-09) and signature (GR-10) rules cannot be skipped by another
+route.
 """
 
 import uuid
 
 from app import db
-from app.models.ballot import Ballot, StagedBallot
-from app.services import ballot_crypto, ballot_keys, ballot_signing
+from app.models.ballot import Ballot, QuarantinedBallot, StagedBallot
+from app.services import ballot_chain, ballot_crypto, ballot_keys, ballot_signing
 
 
 def stage(election_id, raw_token, preferences):
@@ -33,8 +33,19 @@ def find_staged(election_id, raw_token):
     ).first()
 
 
+def chain_head(election_id):
+    return (
+        Ballot.query.filter_by(election_id=election_id)
+        .order_by(Ballot.seq.desc())
+        .first()
+    )
+
+
 def commit(staged):
     """Move a staged ballot into the committed store. Does not call db.session.commit().
+
+    Call while holding ``ballot_chain.append_lock`` and commit before releasing
+    it, so two ballots cannot claim the same chain position.
 
     The committed row gets a fresh random id and a fresh encryption, so nothing
     about the staged row (its id, its token tag) carries over.
@@ -43,7 +54,7 @@ def commit(staged):
         staged.election_id, staged.id, staged.nonce, staged.ciphertext
     )
     ballot_id = str(uuid.uuid4())
-    #GR-10: encrypted and signed in one step.
+    # GR-10: encrypted and signed in one step.
     nonce, ciphertext, signature = ballot_signing.seal(staged.election_id, ballot_id, preferences)
     ballot = Ballot(
         id=ballot_id,
@@ -53,6 +64,8 @@ def commit(staged):
         signature=signature,
         recorded_hour=ballot_crypto.coarse_time(),
     )
+    # GR-11: link onto the end of this election's hash chain.
+    ballot_chain.link(ballot, chain_head(staged.election_id))
     db.session.add(ballot)
     db.session.delete(staged)
     return ballot
@@ -62,12 +75,17 @@ def read_verified_ballots(election_id):
     """Decrypted preferences for every committed ballot whose signature verifies.
 
     Returns (preferences_list, rejected) where rejected is a list of
-    {'id', 'reason'} for ballots that failed signature or decryption checks.
-    Rejected ballots are never counted (GR-10: re-verify at tally time).
+    {'id', 'reason'} for ballots that failed signature or decryption checks,
+    or that the integrity scan has quarantined (GR-11). Rejected ballots are
+    never counted (GR-10: re-verify at tally time).
     """
     accepted, rejected = [], []
     public_key = ballot_keys.verify_key()
-    for row in Ballot.query.filter_by(election_id=election_id).all():
+    quarantined = quarantined_ids(election_id)
+    for row in Ballot.query.filter_by(election_id=election_id).order_by(Ballot.seq).all():
+        if row.id in quarantined:
+            rejected.append({'id': row.id, 'reason': 'quarantined'})
+            continue
         if not ballot_signing.verify_row(row, public_key):
             rejected.append({'id': row.id, 'reason': 'invalid signature'})
             continue
@@ -78,3 +96,9 @@ def read_verified_ballots(election_id):
         except ballot_crypto.BallotCryptoError:
             rejected.append({'id': row.id, 'reason': 'decryption failed'})
     return accepted, rejected
+
+
+def quarantined_ids(election_id):
+    return {
+        row.ballot_id for row in QuarantinedBallot.query.filter_by(election_id=election_id).all()
+    }

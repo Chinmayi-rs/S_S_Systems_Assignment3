@@ -1,14 +1,13 @@
 """GR-10: every ballot is signed when encrypted, unsigned ones are refused, signatures re-checked at tally."""
 
 import pytest
-from sqlalchemy import text
 
 from app import db
 from app.models.ballot import Ballot, BallotToken
 from app.models.user import User
 from app.services import ballot_crypto, ballot_keys, ballot_signing
 from app.services.ballot_signing import UnsignedBallotError
-from tests.conftest import add_verified_voters, auth_headers, cast_ballot
+from tests.conftest import add_verified_voters, auth_headers, cast_ballot, tamper_as_db_admin
 
 
 def make_row(election_id=1, ballot_id='b-1', signature=None, preferences=None):
@@ -81,11 +80,10 @@ def test_tally_skips_a_ballot_tampered_after_storage(app, api):
     with app.app_context():
         # An attacker with direct database access swaps the ciphertext of one ballot.
         other = Ballot.query.filter(Ballot.id != first['reference']).one()
-        with db.engines['ballot'].begin() as conn:
-            conn.execute(
-                text('UPDATE ballots SET ciphertext = :c WHERE id = :i'),
-                {'c': other.ciphertext, 'i': first['reference']},
-            )
+        tamper_as_db_admin(
+            'UPDATE ballots SET ciphertext = :c WHERE id = :i',
+            {'c': other.ciphertext, 'i': first['reference']},
+        )
     delegate = auth_headers(api, 'delegate', 'delegate1234')
     preview = api.get('/api/results', headers=delegate).get_json()
     assert preview['total_ballots'] == 1

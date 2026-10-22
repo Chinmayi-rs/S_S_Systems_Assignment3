@@ -7,7 +7,7 @@ from app.models.user import User
 from app import db
 from app.models.ballot import BallotToken
 from app.models.candidate import Candidate
-from app.services import ballot_store
+from app.services import ballot_chain, ballot_store
 from app.services.ballot_signing import UnsignedBallotError
 from app.services.elections import current_election
 
@@ -179,29 +179,31 @@ def commit_ballot(user, raw_token):
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
-    # GR-05: Atomically mark the voter as having voted.
-    # Only succeeds if has_voted is currently False.
-    result = db.session.execute(
-        update(User)
-        .where(
-            User.id == user.id,
-            User.has_voted.is_(False)
+    # GR-11: the chain lock covers reading the chain head through to commit.
+    with ballot_chain.append_lock:
+        # GR-05: Atomically mark the voter as having voted.
+        # Only succeeds if has_voted is currently False.
+        result = db.session.execute(
+            update(User)
+            .where(
+                User.id == user.id,
+                User.has_voted.is_(False)
+            )
+            .values(has_voted=True)
         )
-        .values(has_voted=True)
-    )
 
-    if result.rowcount != 1:
-        db.session.rollback()
-        return None, ("Already voted", 409)
-    record.status = 'used'
-    record.used_at = datetime.utcnow()
-    ballot = ballot_store.commit(staged)
-    try:
-        db.session.commit()
-    except UnsignedBallotError:
-        #GR-10: the storage layer refused the row. Nothing is half-saved.
-        db.session.rollback()
-        return None, ('The ballot could not be sealed. It was not recorded.', 500)
+        if result.rowcount != 1:
+            db.session.rollback()
+            return None, ("Already voted", 409)
+        record.status = 'used'
+        record.used_at = datetime.utcnow()
+        ballot = ballot_store.commit(staged)
+        try:
+            db.session.commit()
+        except UnsignedBallotError:
+            # GR-10: the storage layer refused the row. Nothing is half-saved.
+            db.session.rollback()
+            return None, ('The ballot could not be sealed. It was not recorded.', 500)
     return {
         'accepted': True,
         'reference': ballot.id,

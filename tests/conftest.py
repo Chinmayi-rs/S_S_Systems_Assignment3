@@ -108,3 +108,22 @@ def add_verified_voters(app, count):
             names.append(name)
         db.session.commit()
     return names
+
+
+def tamper_as_db_admin(sql, params=None):
+    """Simulate an attacker with full database admin rights on the ballot DB.
+
+    They can drop the GR-11 append-only triggers and then edit rows directly.
+    Run inside an app context. The point of the hash chain is that this is
+    still detected.
+    """
+    from sqlalchemy import text
+
+    from app.models.ballot import APPEND_ONLY_TABLES
+
+    with db.engines['ballot'].begin() as conn:
+        for table in APPEND_ONLY_TABLES:
+            conn.execute(text(f'DROP TRIGGER IF EXISTS {table}_no_update'))
+            conn.execute(text(f'DROP TRIGGER IF EXISTS {table}_no_delete'))
+        conn.execute(text(sql), params or {})
+    db.session.expire_all()
