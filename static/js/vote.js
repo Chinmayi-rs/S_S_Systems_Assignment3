@@ -148,10 +148,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         method: 'POST',
         body: JSON.stringify({ token: token }),
       });
+      
+      // GR-07: Clear temporary ballot information after acceptance
       sessionStorage.removeItem('ballotToken');
+
+      // Remove voting preferences from JavaScript variables
+      ranking = [];
+      senateParty = null;
+      house = [];
+
+      // Clear ballot selections and review information from the page
+      document.getElementById('review-body').replaceChildren();
+      houseList.replaceChildren();
+      senateList.replaceChildren();
+
+      // Hide previous voting screens
+      paper.hidden = true;
       review.hidden = true;
+
+      // Display only the acceptance acknowledgement
       document.getElementById('reference').textContent = result.reference;
       done.hidden = false;
+
       if (authUser) {
         authUser.has_voted = true;
         localStorage.setItem('authUser', JSON.stringify(authUser));

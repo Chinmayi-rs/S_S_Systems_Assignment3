@@ -1,6 +1,8 @@
 import hashlib
 import secrets
 from datetime import datetime
+from sqlalchemy import update
+from app.models.user import User
 
 from app import db
 from app.models.ballot import BallotToken
@@ -54,6 +56,11 @@ def voter_status(user):
 def _eligibility_error(user, election):
     if user.role != 'voter':
         return 'Only an enrolled voter can request a ballot', 403
+
+    # GR-05: Prevent inactive accounts from receiving ballots
+    if not user.is_active:
+        return 'Voter account is inactive', 403
+
     if election.status != 'open':
         return 'This election is not open for voting', 409
     if not user.enrolled or not user.eligible:
@@ -78,6 +85,8 @@ def issue_token(user):
             voter_id=user.id, election_id=election.id, status='issued'
         ).update({'status': 'expired'})
     )
+    # GR-06: Generate a cryptographically secure, random
+    # one-time ballot token using 256 bits of randomness.
     raw = secrets.token_urlsafe(32)
     record = BallotToken(
         election_id=election.id,
@@ -163,13 +172,26 @@ def commit_ballot(user, raw_token):
         return None, error
     if user.has_voted:
         return None, ('A ballot has already been accepted for this voter', 409)
+    # GR-06: only accept a staged ballot for the current election.
+    # GR-09: looked up by the ballot-side HMAC tag, scoped to this election.
     staged = ballot_store.find_staged(election.id, raw_token)
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
-    # Identity flag and ballot row commit together through one session.
-    # GR-05 should tighten this with a row lock when the database is Postgres.
-    user.has_voted = True
+    # GR-05: Atomically mark the voter as having voted.
+    # Only succeeds if has_voted is currently False.
+    result = db.session.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.has_voted.is_(False)
+        )
+        .values(has_voted=True)
+    )
+
+    if result.rowcount != 1:
+        db.session.rollback()
+        return None, ("Already voted", 409)
     record.status = 'used'
     record.used_at = datetime.utcnow()
     ballot = ballot_store.commit(staged)
