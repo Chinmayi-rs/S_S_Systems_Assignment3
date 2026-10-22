@@ -3,12 +3,12 @@ import os
 import tempfile
 
 import pytest
-
+import pyotp
 from app import create_app, db
 from app.models.user import User
 from app.services.ballot_box import _eligibility_error
 from app.services.elections import current_election
-
+from app.services.seed import deterministic_totp_secret
 
 # Create temporary databases for testing
 
@@ -45,9 +45,10 @@ def client():
 
 # Login and receive authentication token
 def login(client, username="voter", password="voter1234"):
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
     response = client.post(
         "/api/auth/login",
-        json={"username": username, "password": password}
+        json={"username": username, "password": password, "totp_code": code}
     )
 
     assert response.status_code == 200
