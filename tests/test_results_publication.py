@@ -468,3 +468,9 @@ def test_offline_script_runs_as_a_command_and_sets_the_exit_code(ctx, second_cou
 def test_offline_script_rejects_a_repeated_key_in_the_result(ctx, second_counter):
     client, _, directory = ctx
     first, second = two_delegates(client)
+    publish_results(client, first, second)
+    paths, _ = verification_inputs(client, directory)
+    original = open(paths['results.json'], encoding='utf-8').read()
+    with open(paths['results.json'], 'w', encoding='utf-8') as handle:
+        handle.write(original.replace('"method":', '"method":"x","method":', 1))
+    assert load_script().main([paths['results.json'], paths['results.sig.json'], paths['results.pub.json']]) == 1
