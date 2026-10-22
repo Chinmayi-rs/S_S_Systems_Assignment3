@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 
+import pyotp
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DatabaseError
@@ -9,6 +10,7 @@ from sqlalchemy.exc import DatabaseError
 from app import create_app, db
 from app.models.audit import AuditEvent
 from app.services.audit_chain import GENESIS_HASH
+from app.services.seed import deterministic_totp_secret
 
 
 @pytest.fixture()
@@ -26,7 +28,9 @@ def ctx():
 
 
 def login(client, username, password):
-    res = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    res = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert res.status_code == 200
     return {'Authorization': 'Bearer ' + res.get_json()['access_token']}
 

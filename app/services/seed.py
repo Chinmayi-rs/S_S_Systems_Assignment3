@@ -1,7 +1,18 @@
+import base64
+import hashlib
+
 from app import db
 from app.models.candidate import Candidate
 from app.models.election import Election
 from app.models.user import User
+
+
+def deterministic_totp_secret(username):
+    """Stable TOTP secret for seeded demo accounts, so the README can list
+    them and the tests can compute codes. Accounts registered through the
+    API get a random secret from /api/auth/mfa/setup instead (GR-01)."""
+    digest = hashlib.sha256(f'ballot-desk-totp:{username}'.encode('utf-8')).digest()
+    return base64.b32encode(digest[:20]).decode('ascii')
 
 
 # username, email, password, full name, role, date of birth, address, division, enrolled, eligible
@@ -37,6 +48,10 @@ def create_user(username, email, password, full_name, role, date_of_birth=None, 
         enrolled=enrolled,
         eligible=eligible,
     )
+    # GR-01: seeded accounts arrive with the second factor already enrolled,
+    # so the demo credentials in the README work with any authenticator app.
+    user.totp_secret = deterministic_totp_secret(username)
+    user.mfa_enabled = True
     db.session.add(user)
     return user
 

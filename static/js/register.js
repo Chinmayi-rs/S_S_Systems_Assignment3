@@ -17,10 +17,13 @@ document.addEventListener('DOMContentLoaded', () => {
           division: form.division.value.trim(),
         }),
       });
-      storeSession(data.access_token, data.user);
+      // GR-01: the account exists but has no session yet. The provisional
+      // token only unlocks the authenticator setup page.
+      clearSession();
+      sessionStorage.setItem('mfaSetupToken', data.access_token);
       showAlert(data.message, 'success');
       window.setTimeout(() => {
-        window.location.href = '/dashboard';
+        window.location.href = '/mfa-setup';
       }, 600);
     } catch (err) {
       showAlert(err.message, 'danger');

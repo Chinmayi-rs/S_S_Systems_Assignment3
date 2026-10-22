@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
+import pyotp
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -14,7 +15,7 @@ from app.models.audit import AuditEvent
 from app.models.candidate import Candidate
 from app.models.election import Election
 from app.models.user import User
-from app.services.seed import create_user, seed_if_empty
+from app.services.seed import create_user, deterministic_totp_secret, seed_if_empty
 
 
 @pytest.fixture()
@@ -32,7 +33,9 @@ def ctx():
 
 
 def login(client, username, password):
-    res = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    res = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert res.status_code == 200
     return {'Authorization': 'Bearer ' + res.get_json()['access_token']}
 

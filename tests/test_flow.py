@@ -1,9 +1,11 @@
 import os
 import tempfile
 
+import pyotp
 import pytest
 
 from app import create_app
+from app.services.seed import deterministic_totp_secret
 
 
 @pytest.fixture()
@@ -20,7 +22,9 @@ def client():
 
 
 def login(client, username, password):
-    response = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    response = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert response.status_code == 200
     token = response.get_json()['access_token']
     return {'Authorization': 'Bearer ' + token}

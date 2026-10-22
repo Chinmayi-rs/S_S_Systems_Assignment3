@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Two-factor setup · Ballot Desk{% endblock %}
+
+{% block content %}
+<div class="card narrow">
+    <p class="kicker">Secure your account</p>
+    <h1>Add your authenticator</h1>
+    <p>Scan this QR code with an authenticator app (Google Authenticator, Aegis, 1Password&hellip;),
+       then enter the 6-digit code it shows. You need this code every time you sign in.</p>
+    <div class="stack" style="align-items: center; margin: 1rem 0;">
+        <img id="mfa-qr" alt="TOTP enrolment QR code" hidden
+             style="width: 220px; height: 220px; border-radius: 8px; background: #fff; padding: 8px;">
+        <p id="mfa-secret" style="word-break: break-all; font-size: 0.85rem; opacity: 0.75;"></p>
+    </div>
+    <form id="mfa-form" class="stack">
+        <div>
+            <label for="totp_code">6-digit code</label>
+            <input id="totp_code" name="totp_code" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" pattern="[0-9]{6}" required>
+        </div>
+        <button class="btn" type="submit">Enable two-factor sign-in</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/mfa_setup.js"></script>
+{% endblock %}
