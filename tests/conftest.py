@@ -1,10 +1,12 @@
 import os
 import tempfile
 
+import pyotp
 import pytest
 
 from app import create_app, db
 from app.services import ballot_keys
+from app.services.seed import deterministic_totp_secret
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +45,12 @@ def api(app):
 
 
 def auth_headers(client, username, password):
-    response = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: sign-in needs the password plus a TOTP code. Seeded and test
+    # accounts use the deterministic secret from services/seed.py.
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    response = client.post('/api/auth/login', json={
+        'username': username, 'password': password, 'totp_code': code,
+    })
     assert response.status_code == 200, response.get_json()
     return {'Authorization': 'Bearer ' + response.get_json()['access_token']}
 
@@ -82,7 +89,7 @@ def add_verified_voters(app, count):
     with app.app_context():
         for index in range(count):
             name = f'extra{index}'
-            db.session.add(User(
+            user = User(
                 username=name,
                 email=f'{name}@example.test',
                 password='voter1234',
@@ -93,7 +100,11 @@ def add_verified_voters(app, count):
                 division='Melbourne',
                 enrolled=True,
                 eligible=True,
-            ))
+            )
+            # GR-01: give test voters MFA so they can sign in like seeded accounts.
+            user.totp_secret = deterministic_totp_secret(name)
+            user.mfa_enabled = True
+            db.session.add(user)
             names.append(name)
         db.session.commit()
     return names
