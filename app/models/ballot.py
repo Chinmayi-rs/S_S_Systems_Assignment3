@@ -27,29 +27,51 @@ class BallotToken(db.Model):
         }
 
 
+# ---------------------------------------------------------------------------
+# Ballot database (bind 'ballot'). GR-09 rules for every table below:
+#   * no voter id, no foreign key into the identity database
+#   * no value shared with the identity database (token_tag is an HMAC, not the
+#     SHA-256 stored in ballot_tokens)
+#   * content stored only as AES-256-GCM ciphertext
+#   * timestamps rounded to the hour
+#   * random UUID primary keys, so ids carry no ordering information
+# ---------------------------------------------------------------------------
+
+
+class StagedBallot(db.Model):
+    """A ballot the voter is still reviewing (GR-08 stage step).
+
+    Mutable while the voter changes their mind. Deleted in the same transaction
+    that appends the final Ballot, so no session-to-ballot link survives commit.
+    """
+
+    __bind_key__ = 'ballot'
+    __tablename__ = 'staged_ballots'
+
+    id = db.Column(db.String(36), primary_key=True)
+    election_id = db.Column(db.Integer, nullable=False, index=True)
+    token_tag = db.Column(db.String(64), unique=True, nullable=False)
+    nonce = db.Column(db.String(24), nullable=False)
+    ciphertext = db.Column(db.Text, nullable=False)
+    created_hour = db.Column(db.DateTime, nullable=False)
+
+
 class Ballot(db.Model):
-    """Lives in the ballot database. No voter id column — that split is the GR-06 / GR-09 seam."""
+    """A committed ballot. Encrypted content only."""
 
     __bind_key__ = 'ballot'
     __tablename__ = 'ballots'
 
     id = db.Column(db.String(36), primary_key=True)
     election_id = db.Column(db.Integer, nullable=False, index=True)
-    token_hash = db.Column(db.String(64), unique=True, nullable=False)
-    preferences_json = db.Column(db.Text, nullable=False)
-    # staged | committed
-    status = db.Column(db.String(20), nullable=False, default='staged')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    committed_at = db.Column(db.DateTime)
+    nonce = db.Column(db.String(24), nullable=False)
+    ciphertext = db.Column(db.Text, nullable=False)
+    recorded_hour = db.Column(db.DateTime, nullable=False)
 
-    def to_dict(self, include_preferences=False):
-        payload = {
+    def to_public_dict(self):
+        """What may be shown outside the ballot store: never plaintext."""
+        return {
             'id': self.id,
             'election_id': self.election_id,
-            'status': self.status,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'committed_at': self.committed_at.isoformat() if self.committed_at else None,
+            'recorded_hour': self.recorded_hour.isoformat() if self.recorded_hour else None,
         }
-        if include_preferences:
-            payload['preferences_json'] = self.preferences_json
-        return payload

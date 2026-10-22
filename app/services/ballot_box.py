@@ -1,14 +1,12 @@
 import hashlib
-import json
 import secrets
-import uuid
 from datetime import datetime
 
 from app import db
-from app.models.ballot import Ballot, BallotToken
+from app.models.ballot import BallotToken
 from app.models.candidate import Candidate
+from app.services import ballot_store
 from app.services.elections import current_election
-
 
 def hash_token(token):
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
@@ -151,21 +149,9 @@ def stage_ballot(user, raw_token, house_ids, senate_party):
     if error:
         return None, error
     payload, summary = checked
-    existing = Ballot.query.filter_by(token_hash=record.token_hash).first()
-    if existing and existing.status == 'committed':
-        return None, ('This ballot has already been accepted', 409)
-    if existing:
-        existing.preferences_json = json.dumps(payload)
-        existing.status = 'staged'
-    else:
-        existing = Ballot(
-            id=str(uuid.uuid4()),
-            election_id=election.id,
-            token_hash=record.token_hash,
-            preferences_json=json.dumps(payload),
-            status='staged',
-        )
-        db.session.add(existing)
+    # GR-09: the ballot under review is stored encrypted, keyed by an HMAC tag
+    # of the raw token rather than the identity-side hash.
+    ballot_store.stage(election.id, raw_token, payload)
     db.session.commit()
     summary['staged'] = True
     return summary, None
@@ -177,7 +163,7 @@ def commit_ballot(user, raw_token):
         return None, error
     if user.has_voted:
         return None, ('A ballot has already been accepted for this voter', 409)
-    staged = Ballot.query.filter_by(token_hash=record.token_hash, status='staged').first()
+    staged = ballot_store.find_staged(election.id, raw_token)
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
@@ -186,11 +172,10 @@ def commit_ballot(user, raw_token):
     user.has_voted = True
     record.status = 'used'
     record.used_at = datetime.utcnow()
-    staged.status = 'committed'
-    staged.committed_at = datetime.utcnow()
+    ballot = ballot_store.commit(staged)
     db.session.commit()
     return {
         'accepted': True,
-        'reference': staged.id,
+        'reference': ballot.id,
         'election_id': election.id,
     }, None

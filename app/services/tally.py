@@ -1,8 +1,5 @@
-import json
-
-from app.models.ballot import Ballot
 from app.models.candidate import Candidate
-
+from app.services import ballot_store
 
 def tally_first_preference(election_id):
     """Count committed ballots by House first preference and Senate group.
@@ -10,14 +7,10 @@ def tally_first_preference(election_id):
     GR-12 needs a second function, written by someone else, that does not
     import this one. This skeleton only has the first counter.
     """
-    ballots = Ballot.query.filter_by(election_id=election_id, status='committed').all()
+    ballots = ballot_store.read_ballots(election_id)
     house_counts = {}
     senate_counts = {}
-    for ballot in ballots:
-        try:
-            prefs = json.loads(ballot.preferences_json)
-        except (TypeError, json.JSONDecodeError):
-            continue
+    for prefs in ballots:
         house = prefs.get('house') or []
         if house:
             first = house[0]
