@@ -48,6 +48,11 @@ def audit_page():
     return render_template('audit.html')
 
 
+@main_bp.route('/integrity')
+def integrity_page():
+    return render_template('integrity.html')
+
+
 @main_bp.route('/health')
 def health_check():
     return jsonify({'status': 'healthy', 'service': 'ballot-desk'}), 200

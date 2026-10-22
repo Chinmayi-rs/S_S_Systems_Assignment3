@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Integrity · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Ballot store</p>
+<h1>Chain integrity</h1>
+<p class="lede">Every accepted ballot is hash-chained to the one before it. The scan recomputes each link, checks each signature and decrypts each ballot. A ballot that fails is quarantined and not counted.</p>
+<div class="card">
+    <p id="integrity-summary">Loading…</p>
+    <button class="btn" type="button" id="scan-button">Run scan now</button>
+</div>
+<div class="card table-wrap">
+    <h2>Quarantined ballots</h2>
+    <table>
+        <thead><tr><th>Detected</th><th>Ballot</th><th>Reason</th></tr></thead>
+        <tbody id="quarantine-rows"></tbody>
+    </table>
+</div>
+<div class="card table-wrap">
+    <h2>Recent scans</h2>
+    <table>
+        <thead><tr><th>When</th><th>Election</th><th>Checked</th><th>Result</th><th>Findings</th></tr></thead>
+        <tbody id="scan-rows"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/integrity.js"></script>
+{% endblock %}

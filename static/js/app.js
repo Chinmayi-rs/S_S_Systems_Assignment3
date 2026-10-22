@@ -62,6 +62,10 @@ function updateChrome() {
   if (auditLink) {
     auditLink.hidden = !(authUser && authUser.role === 'auditor');
   }
+  const integrityLink = document.getElementById('integrity-link');
+  if (integrityLink) {
+    integrityLink.hidden = !(authUser && ['auditor', 'commissioner_delegate'].includes(authUser.role));
+  }
 }
 
 function showAlert(message, type) {

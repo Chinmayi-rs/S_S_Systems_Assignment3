@@ -22,5 +22,13 @@ def results():
         payload['preview'] = True
         return jsonify(payload), 200
     payload = build_results(election)
+    if payload['release_blocked']:
+        # GR-12: never publish counts that two independent tallies do not agree on.
+        # Delegates and auditors still get the details so they can investigate.
+        user = optional_user()
+        if user and user.role in ('commissioner_delegate', 'auditor'):
+            payload['preview'] = True
+            return jsonify(payload), 200
+        return json_error(payload['release_reason'], 503)
     payload['preview'] = False
     return jsonify(payload), 200

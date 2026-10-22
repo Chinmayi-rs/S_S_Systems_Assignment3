@@ -91,7 +91,7 @@ def test_ballot_is_accepted_once(client):
     assert again.status_code == 409
 
 
-def test_results_stay_hidden_until_close(client):
+def test_results_stay_hidden_until_close(client, second_counter):
     hidden = client.get('/api/results')
     assert hidden.status_code == 403
 
