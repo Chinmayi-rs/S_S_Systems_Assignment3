@@ -23,7 +23,7 @@ from app.models.candidate import Candidate
 from app.models.election import Election
 from app.models.user import User
 from app.services.audit_log import append_audit
-from app.services import results_publication
+from app.services import results_publication, tally_gate
 from app.services.elections import current_election
 from app.utils.constants import ELECTION_CLOSED, ELECTION_OPEN, ROLE_DELEGATE
 
@@ -139,7 +139,13 @@ def _execute_results_release(payload, note, ctx):
     if election.status != ELECTION_CLOSED:
         raise ApprovalError('The poll is no longer closed, so the results cannot be published', 409)
     try:
-        row = results_publication.publish(election, ctx['proposer'], ctx['approver'], ctx['approval_id'])
+        row = results_publication.publish(
+            election,
+            ctx['proposer'],
+            ctx['approver'],
+            ctx['approval_id'],
+            tally_outcome=ctx['tally_outcome'],
+        )
     except results_publication.PublicationError as err:
         raise ApprovalError(err.message, err.status)
     detail = json.dumps({
@@ -271,6 +277,13 @@ def approve(approver, approval_id):
         raise ApprovalError('The person who proposed an action cannot approve it. A second delegate is needed.', 403)
     _require_chosen_approver(row, approver, 'approve')
 
+    tally_outcome = None
+    if row.action_type == 'results.release':
+        payload = json.loads(row.payload)
+        tally_outcome = tally_gate.dual_tally(payload['election_id'])
+        if not tally_outcome['released']:
+            raise ApprovalError(tally_outcome['reason'] or 'The tally gate blocked publication', 409)
+
     # Atomic claim: if two approvals race, only one UPDATE matches status='proposed'.
     claimed = PendingApproval.query.filter_by(id=row.id, status=PROPOSED, approver_id=approver.id).update(
         {'status': APPROVED, 'decided_by_id': approver.id, 'decided_at': datetime.utcnow()},
@@ -287,7 +300,12 @@ def approve(approver, approval_id):
         raise ApprovalError('This action type is no longer supported', 409)
 
     # If execute() raises, the route rolls back everything above and the request stays "proposed".
-    ctx = {'approval_id': row.id, 'proposer': proposer, 'approver': approver}
+    ctx = {
+        'approval_id': row.id,
+        'proposer': proposer,
+        'approver': approver,
+        'tally_outcome': tally_outcome,
+    }
     action, detail = handler[1](json.loads(row.payload), note, ctx)
     append_audit(
         'approval.approved',
