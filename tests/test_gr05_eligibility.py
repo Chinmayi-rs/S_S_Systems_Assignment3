@@ -3,7 +3,8 @@ import os
 import tempfile
 
 import pytest
-
+import pyotp
+from app.services.seed import deterministic_totp_secret
 from app import create_app, db
 from app.models.user import User
 from app.services.ballot_box import _eligibility_error
@@ -43,14 +44,22 @@ def client():
 
 
 
-# Login and receive authentication token
+# Log in using password and MFA verification
 def login(client, username="voter", password="voter1234"):
+    totp_code = pyotp.TOTP(
+        deterministic_totp_secret(username)
+    ).now()
+
     response = client.post(
         "/api/auth/login",
-        json={"username": username, "password": password}
+        json={
+            "username": username,
+            "password": password,
+            "totp_code": totp_code
+        }
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.get_json()
 
     token = response.get_json()["access_token"]
     return {"Authorization": "Bearer " + token}
