@@ -127,3 +127,32 @@ def tamper_as_db_admin(sql, params=None):
             conn.execute(text(f'DROP TRIGGER IF EXISTS {table}_no_delete'))
         conn.execute(text(sql), params or {})
     db.session.expire_all()
+
+
+
+def _test_double_second_counter(ballots):
+    """Stand-in for counter B until a teammate lands app/services/tally_secondary.py.
+
+    Remove this and the fixture below once the real module is implemented.
+    """
+    result = {'total': len(ballots), 'house': {}, 'senate': {}}
+    for ballot in ballots:
+        if ballot.get('house'):
+            key = str(ballot['house'][0])
+            result['house'][key] = result['house'].get(key, 0) + 1
+        if ballot.get('senate_party'):
+            key = ballot['senate_party']
+            result['senate'][key] = result['senate'].get(key, 0) + 1
+    return result
+
+
+@pytest.fixture()
+def second_counter(monkeypatch):
+    """Use when a test needs results to publish while tally_secondary is still a stub."""
+    from app.services import tally_secondary
+
+    try:
+        tally_secondary.count([])
+    except NotImplementedError:
+        monkeypatch.setattr(tally_secondary, 'count', _test_double_second_counter)
+    return tally_secondary

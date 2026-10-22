@@ -64,6 +64,9 @@ def results():
     payload = build_results(election)
     payload['preview'] = True
     payload['published'] = False
+    # GR-12: a blocked dual tally is still shown here (release_blocked, release_reason,
+    # tally_differences) so delegates and auditors can investigate. Publication itself is
+    # refused in approvals.approve() when the gate does not release.
     return jsonify(payload), 200
 
 
