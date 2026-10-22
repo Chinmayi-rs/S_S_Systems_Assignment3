@@ -27,6 +27,7 @@ PERMISSIONS = {
     'approval.propose': {ROLE_DELEGATE},
     'approval.decide': {ROLE_DELEGATE},
     'approval.read': {ROLE_DELEGATE, ROLE_AUDITOR},
+    'ballot.integrity': {ROLE_DELEGATE, ROLE_AUDITOR},
 }
 
 

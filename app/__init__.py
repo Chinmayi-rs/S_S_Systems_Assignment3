@@ -77,6 +77,7 @@ def create_app():
     from app.routes.candidates import candidates_bp
     from app.routes.elections import elections_bp
     from app.routes.enrolment import enrolment_bp
+    from app.routes.integrity import integrity_bp
     from app.routes.main import main_bp
     from app.routes.results import results_bp
 
@@ -89,10 +90,14 @@ def create_app():
     app.register_blueprint(results_bp, url_prefix='/api/results')
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
     app.register_blueprint(approvals_bp, url_prefix='/api/approvals')
-
+    app.register_blueprint(integrity_bp, url_prefix='/api/integrity')
     with app.app_context():
         db.create_all()
         from app.services.seed import seed_if_empty
         seed_if_empty()
+
+    # GR-11: periodic ballot-chain integrity scan (INTEGRITY_SCAN_SECONDS, default 30).
+    from app.services.ballot_integrity import start_background_scan
+    start_background_scan(app)
 
     return app
