@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Approvals · Ballot Desk{% endblock %}
+
+{% block content %}
+<p class="kicker">Two-person rule</p>
+<h1>Approvals</h1>
+<p class="lede">Closing or reopening the poll, withdrawing or restoring a candidate, and publishing the signed results need two different delegates. The delegate who sends the request chooses who must approve it. Only that delegate can approve or reject it.</p>
+<div class="card table-wrap">
+    <table>
+        <thead>
+            <tr><th>#</th><th>Action</th><th>Detail</th><th>Proposed by</th><th>Sent to</th><th>Status</th><th>Decided by</th><th></th></tr>
+        </thead>
+        <tbody id="approval-rows"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/approvals.js"></script>
+{% endblock %}

@@ -1,9 +1,11 @@
 import os
 import tempfile
 
+import pyotp
 import pytest
 
 from app import create_app
+from app.services.seed import deterministic_totp_secret
 
 
 @pytest.fixture()
@@ -20,7 +22,9 @@ def client():
 
 
 def login(client, username, password):
-    response = client.post('/api/auth/login', json={'username': username, 'password': password})
+    # GR-01: every account signs in with password + TOTP code
+    code = pyotp.TOTP(deterministic_totp_secret(username)).now()
+    response = client.post('/api/auth/login', json={'username': username, 'password': password, 'totp_code': code})
     assert response.status_code == 200
     token = response.get_json()['access_token']
     return {'Authorization': 'Bearer ' + token}
@@ -91,7 +95,7 @@ def test_ballot_is_accepted_once(client):
     assert again.status_code == 409
 
 
-def test_results_stay_hidden_until_close(client):
+def test_results_stay_hidden_until_published(client):
     hidden = client.get('/api/results')
     assert hidden.status_code == 403
 
@@ -107,9 +111,28 @@ def test_results_stay_hidden_until_close(client):
     denied = client.get('/api/audit', headers=voter)
     assert denied.status_code == 403
 
-    closed = client.post('/api/elections/current/status', json={'status': 'closed'}, headers=delegate)
+    # GR-14: one delegate cannot close the poll alone
+    direct = client.post('/api/elections/current/status', json={'status': 'closed'}, headers=delegate)
+    assert direct.status_code == 409
+    approver_id = client.get('/api/approvals/delegates', headers=delegate).get_json()['delegates'][0]['id']  # delegate2
+    proposed = client.post('/api/approvals', json={'action_type': 'election.status', 'status': 'closed', 'approver_id': approver_id}, headers=delegate)
+    assert proposed.status_code == 201
+    second = login(client, 'delegate2', 'delegate21234')
+    closed = client.post(f"/api/approvals/{proposed.get_json()['approval']['id']}/approve", headers=second)
     assert closed.status_code == 200
+
+    # GR-13: closing the poll is not publishing. Outsiders still get 403 and delegates still only see a preview.
+    assert client.get('/api/results').status_code == 403
+    still_preview = client.get('/api/results', headers=delegate).get_json()
+    assert still_preview['preview'] is True and still_preview['published'] is False
+
+    # the results go public only after two delegates publish them (signed)
+    release = client.post('/api/approvals', json={'action_type': 'results.release', 'approver_id': approver_id}, headers=delegate)
+    assert release.status_code == 201
+    done = client.post(f"/api/approvals/{release.get_json()['approval']['id']}/approve", headers=second)
+    assert done.status_code == 200
     published = client.get('/api/results')
     assert published.status_code == 200
     assert published.get_json()['preview'] is False
+    assert published.get_json()['published'] is True
     assert published.get_json()['method'] == 'first-preference'
