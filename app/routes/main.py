@@ -57,6 +57,9 @@ def audit_page():
 def approvals_page():
     return render_template('approvals.html')
 
+@main_bp.route('/integrity')
+def integrity_page():
+    return render_template('integrity.html')
 
 @main_bp.route('/health')
 def health_check():

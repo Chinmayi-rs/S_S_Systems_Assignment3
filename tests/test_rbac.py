@@ -23,6 +23,7 @@ PUBLIC_API = {
     ('/api/results', 'GET'),           # guarded by publication state, not auth
     ('/api/results/public-key', 'GET'),
     ('/api/results/verify', 'GET'),
+    ('/api/ballots/public-key', 'GET'),  #GR-10: ballot verify key, public by design
 }
 
 

@@ -95,7 +95,7 @@ def test_ballot_is_accepted_once(client):
     assert again.status_code == 409
 
 
-def test_results_stay_hidden_until_published(client):
+def test_results_stay_hidden_until_published(client, second_counter):
     hidden = client.get('/api/results')
     assert hidden.status_code == 403
 
@@ -130,7 +130,7 @@ def test_results_stay_hidden_until_published(client):
     release = client.post('/api/approvals', json={'action_type': 'results.release', 'approver_id': approver_id}, headers=delegate)
     assert release.status_code == 201
     done = client.post(f"/api/approvals/{release.get_json()['approval']['id']}/approve", headers=second)
-    assert done.status_code == 200
+    assert done.status_code == 200, done.get_json()
     published = client.get('/api/results')
     assert published.status_code == 200
     assert published.get_json()['preview'] is False

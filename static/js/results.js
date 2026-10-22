@@ -108,6 +108,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       : 'Published count. Ballots accepted: ' + data.total_ballots + '.';
     root.append(note, resultBlock('House, first preference', data.house || []), resultBlock('Senate, above the line', data.senate || []));
     if (data.published && data.signature) signatureBox(data);
+        if (data.release_blocked) {
+      const blocked = document.createElement('p');
+      blocked.className = 'alert alert-danger';
+      blocked.textContent = data.release_reason + (data.tally_differences && data.tally_differences.length
+        ? ' (' + data.tally_differences.join('; ') + ')' : '');
+      root.append(blocked);
+    }
+    if (data.rejected_ballots) {
+      const rejected = document.createElement('p');
+      rejected.className = 'alert alert-danger';
+      rejected.textContent = data.rejected_ballots + ' stored ballot(s) failed integrity checks and were not counted.';
+      root.append(rejected);
+    }
   } catch (err) {
     root.textContent = err.message;
   }

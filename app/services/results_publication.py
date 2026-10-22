@@ -3,7 +3,7 @@
 Publishing is a two-delegate action (GR-14, action type 'results.release'). When the second
 delegate approves, the app:
 
-  1. checks that the counters agree (GR-12 plugs into counts_agree()),
+    1. requires the GR-12 dual tally gate to release the counts,
   2. builds the result as canonical JSON (sorted keys, no spaces - the same rule as the audit chain),
      together with who proposed it, who approved it and the audit log head at that moment,
   3. signs SHA-256(that JSON) with the election's own Ed25519 key,
@@ -30,6 +30,7 @@ from app.models.published_result import PublishedResult, ResultsKey
 from app.services.audit_chain import GENESIS_HASH, canonical
 from app.services.audit_log import append_audit
 from app.services.tally import build_results
+from app.services.tally_gate import dual_tally
 
 ALGORITHM = 'Ed25519'
 SIGN_PREFIX = b'BALLOTDESK-RESULTS-v1|'  # domain separation: this key signs nothing else
@@ -61,16 +62,6 @@ def _kek() -> bytes:
 def _aad(election_id: int) -> bytes:
     # the election id is bound in as associated data: a sealed key cannot be moved to another election
     return f'results-key:{election_id}'.encode('ascii')
-
-
-# ---- GR-12 plug-in point -----------------------------------------------------------------------
-
-def counts_agree(election) -> bool:
-    """GR-12 replaces this with a comparison of the two independent counters.
-
-    Publication is refused when they disagree. Until GR-12 exists there is only one counter.
-    """
-    return True
 
 
 # ---- the signing key ---------------------------------------------------------------------------
@@ -128,12 +119,14 @@ def _audit_head() -> str:
     return last.entry_hash if last else GENESIS_HASH
 
 
-def publish(election, proposer, approver, approval_id) -> PublishedResult:
+def publish(election, proposer, approver, approval_id, tally_outcome=None) -> PublishedResult:
     """Sign and store the result. Runs inside the approval transaction: any failure undoes everything."""
     if get_published(election.id):
         raise PublicationError('The results of this election are already published')
-    if not counts_agree(election):
-        raise PublicationError('The two counters do not agree, so the results cannot be published')
+    if tally_outcome is None:
+        tally_outcome = dual_tally(election.id)
+    if not tally_outcome['released']:
+        raise PublicationError(tally_outcome['reason'] or 'The tally gate blocked publication')
 
     key = get_or_create_key(election, approver)
     published_at = datetime.utcnow().replace(microsecond=0)

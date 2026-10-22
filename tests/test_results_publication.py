@@ -120,7 +120,7 @@ def verification_inputs(client, directory):
 
 # ---- who may publish ---------------------------------------------------------------------------
 
-def test_one_delegate_cannot_publish_alone(ctx):
+def test_one_delegate_cannot_publish_alone(ctx, second_counter):
     client, app, _ = ctx
     first, second = two_delegates(client)
     close_poll(client, first, second)
@@ -199,7 +199,7 @@ def test_hidden_response_does_not_contain_any_count(ctx):
 
 # ---- the signed result -------------------------------------------------------------------------
 
-def test_published_result_is_signed_and_checks_with_the_public_key(ctx):
+def test_published_result_is_signed_and_checks_with_the_public_key(ctx, second_counter):
     client, _, _ = ctx
     first_choice = cast_one_ballot(client)
     first, second = two_delegates(client)
@@ -235,7 +235,7 @@ def test_published_result_is_signed_and_checks_with_the_public_key(ctx):
     assert verified['valid'] is True and all(verified['checks'].values())
 
 
-def test_signature_is_bound_to_the_audit_log_and_to_both_people(ctx):
+def test_signature_is_bound_to_the_audit_log_and_to_both_people(ctx, second_counter):
     client, app, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -253,7 +253,7 @@ def test_signature_is_bound_to_the_audit_log_and_to_both_people(ctx):
         assert registered.actor_username == 'delegate2'
 
 
-def test_the_results_key_is_separate_from_the_delegate_keys(ctx):
+def test_the_results_key_is_separate_from_the_delegate_keys(ctx, second_counter):
     client, app, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -266,7 +266,7 @@ def test_the_results_key_is_separate_from_the_delegate_keys(ctx):
         assert len(base64.b64decode(results_key.private_key_enc)) > 32
 
 
-def test_audit_chain_and_delegate_signatures_stay_valid(ctx):
+def test_audit_chain_and_delegate_signatures_stay_valid(ctx, second_counter):
     client, _, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -278,7 +278,7 @@ def test_audit_chain_and_delegate_signatures_stay_valid(ctx):
 
 # ---- only once, and never changed --------------------------------------------------------------
 
-def test_results_cannot_be_published_twice(ctx):
+def test_results_cannot_be_published_twice(ctx, second_counter):
     client, app, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -298,7 +298,7 @@ def test_results_cannot_be_published_twice(ctx):
         db.session.rollback()
 
 
-def test_database_refuses_to_change_or_delete_a_published_result(ctx):
+def test_database_refuses_to_change_or_delete_a_published_result(ctx, second_counter):
     client, app, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -315,7 +315,7 @@ def test_database_refuses_to_change_or_delete_a_published_result(ctx):
         assert PublishedResult.query.count() == 1
 
 
-def test_the_poll_cannot_be_reopened_after_publication(ctx):
+def test_the_poll_cannot_be_reopened_after_publication(ctx, second_counter):
     client, _, _ = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -369,28 +369,35 @@ def test_a_release_cannot_be_proposed_while_a_reopen_is_waiting(ctx):
 
 def test_publication_is_refused_when_the_counters_disagree(ctx, monkeypatch):
     client, app, _ = ctx
+    from app.services import tally_primary, tally_secondary
+
+    cast_one_ballot(client)
+
+    def off_by_one(ballots):
+        result = tally_primary.count(ballots)
+        party = next(iter(result['senate']))
+        result['senate'][party] -= 1
+        return result
+
+    monkeypatch.setattr(tally_secondary, 'count', off_by_one)
     first, second = two_delegates(client)
     close_poll(client, first, second)
     release_id = propose_release(client, first).get_json()['approval']['id']
-    monkeypatch.setattr(results_publication, 'counts_agree', lambda election: False)
 
     refused = client.post(f'/api/approvals/{release_id}/approve', headers=second)
     assert refused.status_code == 409
-    assert 'do not agree' in refused.get_json()['error']
+    assert 'tallies disagree' in refused.get_json()['error']
     assert client.get('/api/results').status_code == 403
     with app.app_context():
         assert PublishedResult.query.count() == 0
         assert ResultsKey.query.count() == 0  # not even a key was left behind
         assert AuditEvent.query.filter_by(action='results.release').count() == 0
-
-
-def test_counts_agree_is_a_placeholder_that_says_yes():
-    assert results_publication.counts_agree(None) is True
+        assert AuditEvent.query.filter_by(action='tally.mismatch').count() == 1
 
 
 # ---- a changed stored result is noticed --------------------------------------------------------
 
-def test_verify_endpoint_notices_a_result_changed_behind_the_apps_back(ctx):
+def test_verify_endpoint_notices_a_result_changed_behind_the_apps_back(ctx, second_counter):
     client, app, directory = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -409,7 +416,7 @@ def test_verify_endpoint_notices_a_result_changed_behind_the_apps_back(ctx):
 
 # ---- the offline script ------------------------------------------------------------------------
 
-def test_offline_script_accepts_the_real_result_and_rejects_a_changed_one(ctx):
+def test_offline_script_accepts_the_real_result_and_rejects_a_changed_one(ctx, second_counter):
     client, _, directory = ctx
     cast_one_ballot(client)
     first, second = two_delegates(client)
@@ -444,7 +451,7 @@ def test_offline_script_accepts_the_real_result_and_rejects_a_changed_one(ctx):
     assert script.main(args) == 1
 
 
-def test_offline_script_runs_as_a_command_and_sets_the_exit_code(ctx):
+def test_offline_script_runs_as_a_command_and_sets_the_exit_code(ctx, second_counter):
     client, _, directory = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)
@@ -458,7 +465,7 @@ def test_offline_script_runs_as_a_command_and_sets_the_exit_code(ctx):
     assert bad.returncode == 1 and bad.stdout.startswith('FAIL')
 
 
-def test_offline_script_rejects_a_repeated_key_in_the_result(ctx):
+def test_offline_script_rejects_a_repeated_key_in_the_result(ctx, second_counter):
     client, _, directory = ctx
     first, second = two_delegates(client)
     publish_results(client, first, second)

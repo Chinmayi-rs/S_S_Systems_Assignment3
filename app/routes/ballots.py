@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 
 from app import db
 from app.services.audit_log import append_audit
+from app.services.ballot_keys import public_key_pem
 from app.services.ballot_box import commit_ballot, issue_token, stage_ballot, voter_status
 from app.utils.rbac import require_permission
 
@@ -60,3 +61,9 @@ def commit(current_user):
         'message': 'Ballot accepted',
         'reference': payload['reference'],
     }), 201
+
+
+@ballots_bp.route('/public-key', methods=['GET'])
+def public_key():
+    """GR-10: the election verify key, public so anyone can check ballot signatures."""
+    return jsonify({'algorithm': 'Ed25519', 'public_key_pem': public_key_pem()}), 200

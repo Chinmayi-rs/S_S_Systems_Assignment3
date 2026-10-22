@@ -1,16 +1,15 @@
 import hashlib
-import json
 import secrets
-import uuid
 from datetime import datetime
 from sqlalchemy import update
 from app.models.user import User
 
 from app import db
-from app.models.ballot import Ballot, BallotToken
+from app.models.ballot import BallotToken
 from app.models.candidate import Candidate
+from app.services import ballot_chain, ballot_store
+from app.services.ballot_signing import UnsignedBallotError
 from app.services.elections import current_election
-
 
 def hash_token(token):
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
@@ -160,21 +159,9 @@ def stage_ballot(user, raw_token, house_ids, senate_party):
     if error:
         return None, error
     payload, summary = checked
-    existing = Ballot.query.filter_by(token_hash=record.token_hash).first()
-    if existing and existing.status == 'committed':
-        return None, ('This ballot has already been accepted', 409)
-    if existing:
-        existing.preferences_json = json.dumps(payload)
-        existing.status = 'staged'
-    else:
-        existing = Ballot(
-            id=str(uuid.uuid4()),
-            election_id=election.id,
-            token_hash=record.token_hash,
-            preferences_json=json.dumps(payload),
-            status='staged',
-        )
-        db.session.add(existing)
+    # GR-09: the ballot under review is stored encrypted, keyed by an HMAC tag
+    # of the raw token rather than the identity-side hash.
+    ballot_store.stage(election.id, raw_token, payload)
     db.session.commit()
     summary['staged'] = True
     return summary, None
@@ -186,36 +173,39 @@ def commit_ballot(user, raw_token):
         return None, error
     if user.has_voted:
         return None, ('A ballot has already been accepted for this voter', 409)
-    # GR-06: Only accept a staged ballot for the current election
-    staged = Ballot.query.filter_by(
-        token_hash=record.token_hash,
-        election_id=election.id,
-        status='staged'
-).first()
+    # GR-06: only accept a staged ballot for the current election.
+    # GR-09: looked up by the ballot-side HMAC tag, scoped to this election.
+    staged = ballot_store.find_staged(election.id, raw_token)
     if not staged:
         return None, ('Review the ballot before it can be accepted', 400)
 
-    # GR-05: Atomically mark the voter as having voted.
-    # Only succeeds if has_voted is currently False.
-    result = db.session.execute(
-        update(User)
-        .where(
-            User.id == user.id,
-            User.has_voted.is_(False)
+    # GR-11: the chain lock covers reading the chain head through to commit.
+    with ballot_chain.append_lock:
+        # GR-05: Atomically mark the voter as having voted.
+        # Only succeeds if has_voted is currently False.
+        result = db.session.execute(
+            update(User)
+            .where(
+                User.id == user.id,
+                User.has_voted.is_(False)
+            )
+            .values(has_voted=True)
         )
-        .values(has_voted=True)
-    )
 
-    if result.rowcount != 1:
-        db.session.rollback()
-        return None, ("Already voted", 409)
-    record.status = 'used'
-    record.used_at = datetime.utcnow()
-    staged.status = 'committed'
-    staged.committed_at = datetime.utcnow()
-    db.session.commit()
+        if result.rowcount != 1:
+            db.session.rollback()
+            return None, ("Already voted", 409)
+        record.status = 'used'
+        record.used_at = datetime.utcnow()
+        ballot = ballot_store.commit(staged)
+        try:
+            db.session.commit()
+        except UnsignedBallotError:
+            # GR-10: the storage layer refused the row. Nothing is half-saved.
+            db.session.rollback()
+            return None, ('The ballot could not be sealed. It was not recorded.', 500)
     return {
         'accepted': True,
-        'reference': staged.id,
+        'reference': ballot.id,
         'election_id': election.id,
     }, None

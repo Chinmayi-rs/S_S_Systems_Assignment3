@@ -145,6 +145,9 @@ Delete `data/identity.db` (or the Docker tmpfs restarts clean anyway) so
 - A second ballot for the same voter is rejected.
 - Results are a first-preference count. Hidden from everyone but a delegate or auditor (preview) until two delegates publish them with an Ed25519 signature (GR-13). Closing the poll does not publish them.
 - Auditor can read an action log. A committed ballot is logged with no voter and no preferences.
+- Ballots are encrypted (AES-256-GCM) and signed (Ed25519) before they are stored, and cannot be linked to the voter (GR-09, GR-10).
+- The ballot store is append-only and hash-chained; a background scan every 30 seconds quarantines any ballot that was changed (GR-11).
+- Two independent counters must agree before results can be published (GR-12).
 
 House counting is first preference only. Senate is above-the-line only. Full preferential distribution and STV are out of this skeleton on purpose.
 
@@ -166,7 +169,7 @@ Two SQLite files stand in for the two databases:
 - `identity.db` — people, enrolment, candidates, one-time token hashes, audit
 - `ballot.db` — ballots only. The ballot table has no voter id column.
 
-`BallotToken` (identity) and `Ballot` (ballot) meet only by a SHA-256 of a random token. The raw token is returned once to the browser.
+`BallotToken` (identity) stores a SHA-256 of a random token. The ballot side stores a different value, an HMAC of the same token with a key held outside both databases (GR-09), so the two databases cannot be joined without the raw token. The raw token is returned once to the browser.
 
 ## API
 
@@ -193,11 +196,14 @@ Two SQLite files stand in for the two databases:
 | POST | /api/ballots/issue | voter |
 | POST | /api/ballots/stage | voter, body `{ "token", "house": [ids in preference order], "senate_party" }` |
 | POST | /api/ballots/commit | voter, body `{ "token" }` |
+| GET | /api/ballots/public-key | public: the Ed25519 key that verifies ballot signatures (GR-10) |
 | GET | /api/results | public only after the signed publication (403 before); delegate and auditor may preview |
 | GET | /api/results/public-key | public after publication: results public key and fingerprint |
 | GET | /api/results/verify | public after publication: the server re-checks the stored signature |
 | POST | /api/approvals | delegate, body `{ "action_type": "results.release", "approver_id" }` proposes publishing |
 | GET | /api/audit | auditor |
+| GET | /api/integrity | delegate, auditor: scan history and quarantined ballots (GR-11) |
+| POST | /api/integrity/scan | delegate, auditor: run the integrity scan now (GR-11) |
 
 ## Where the 20 requirements plug in
 
@@ -213,10 +219,10 @@ Not built yet. Do not treat the notes below as the implementation.
 | GR-06 | Token hash split is already the shape. Still need unlinkability review. |
 | GR-07 | `services/audit_log.py`. Ballot commit already omits actor and preferences. |
 | GR-08 | `templates/vote.html` review step and stage/commit. |
-| GR-09 | `SQLALCHEMY_BINDS`. Swap the two SQLite URLs for Postgres, then encrypt the ballot body. |
-| GR-10 | Sign inside `commit_ballot` before the row is stored. |
-| GR-11 | Ballot model plus a database role that cannot update or delete. |
-| GR-12 | Add a second tally module that does not import `services/tally.py`. |
+| GR-09 | Done: `services/ballot_crypto.py`, `ballot_store.py`, `ballot_keys.py`. AES-256-GCM, HMAC token tag, separate staged and committed tables (see below). |
+| GR-10 | Done: `services/ballot_signing.py`. Ed25519 at encryption, refused before insert if invalid, re-verified at tally (see below). |
+| GR-11 | Done: `services/ballot_chain.py`, `ballot_integrity.py`, `/integrity` page. Append-only triggers, hash chain, scan every 30 s (see below). |
+| GR-12 | Counter A and the gate are done (`tally_primary.py`, `tally_gate.py`), enforced at result release. Counter B (`tally_secondary.py`) must be written by another member (see below). |
 | GR-13 | Done: `services/results_publication.py`, `routes/results.py`, `scripts/verify_results.py` (see below). |
 | GR-14 | New approvals table in front of close / exclude / publish. |
 | GR-15 | Hash-chain `AuditEvent` in `services/audit_log.py`. |
@@ -291,7 +297,7 @@ Not built yet. Do not treat the notes below as the implementation.
 - Stored in `published_results` (one row per election, UPDATE and DELETE blocked by triggers). The key's fingerprint is written to the audit chain (`results.key.registered`).
 - The key is encrypted with AES-GCM using `RESULTS_KEY_SECRET` (set it; do not reuse `DELEGATE_KEY_SECRET`).
 - Before publication anybody who is not a delegate or auditor gets 403, whether the poll is open or closed. While a publish request is waiting, nobody can send a request to reopen the poll (and no publish request can be sent while a reopen request is waiting). A published poll cannot be reopened.
-- `GR-12` plugs in at `counts_agree()` in `services/results_publication.py`. It returns True until the second counter exists.
+- GR-12 is enforced when the second delegate approves the release: `tally_gate.dual_tally()` must release the counts, or the approval is refused (409) and the request stays waiting. The signed result is built from the same checked counts.
 
 Check a result offline (needs only `pip install cryptography`). Download the three files from the Results page, then:
 
@@ -305,3 +311,44 @@ Limits to state in the report:
 - The private key sits on the server. Anyone who takes the server and `RESULTS_KEY_SECRET` could sign a false result. Production should use an HSM or KMS.
 - The signature shows this is the published result and it was not changed afterwards. It does not show the count was right (GR-11, GR-12).
 - One result per election. A recount after publication would need a `version` column.
+
+## GR-09 Ballot encryption and identity separation
+
+- `services/ballot_crypto.py` encrypts each ballot with **AES-256-GCM** and a random 96-bit nonce. The election id and ballot id are bound in as associated data, so a ciphertext copied into another row fails to decrypt.
+- Every ballot is **padded to 512 bytes** before encryption, so the ciphertext length does not reveal the vote.
+- **Token tag.** The identity database stores `SHA-256(token)` next to the voter. The ballot database stores `HMAC(tag key, token)`. Without the raw token, which only the voter's browser holds, the two cannot be matched.
+- **Separate tables.** `staged_ballots` holds a ballot during review and is deleted in the same transaction that writes the final row to `ballots`. The final row gets a fresh random id and a fresh encryption.
+- Ballot timestamps are rounded to the hour. No ballot table has a voter column or a foreign key to the identity database.
+- **Keys** (`services/ballot_keys.py`) never live in either database. They come from `BALLOT_ENC_KEY`, `BALLOT_TAG_KEY` and `BALLOT_SIGNING_KEY`, or in development from files in `instance/keys/` (created on first run, git-ignored). Generate production values with `python scripts/generate_ballot_keys.py`.
+
+## GR-10 Ballot digital signatures
+
+- `services/ballot_signing.py` signs each ballot with **Ed25519** when it is encrypted. The signature covers the election id, ballot id, nonce and ciphertext, never the plaintext.
+- A SQLAlchemy `before_insert` hook verifies the signature. An unsigned or forged ballot raises `UnsignedBallotError`, the whole transaction rolls back, and the voter is not marked as voted.
+- Signatures are checked again at tally time (`ballot_store.read_verified_ballots()`). Ballots that fail are not counted and are reported as `rejected_ballots`.
+- `GET /api/ballots/public-key` publishes the verify key.
+
+## GR-11 Append-only, hash-chained ballot store
+
+- Each ballot stores `seq`, `prev_hash` and `record_hash = SHA-256(prev_hash | every stored field)`, one chain per election (`services/ballot_chain.py`).
+- **Append-only, two layers:** ORM `before_update` / `before_delete` hooks, and database triggers that abort any `UPDATE` or `DELETE`, even raw SQL. SQLite triggers are used now; Postgres trigger DDL is included but untested.
+- **Integrity scan** (`services/ballot_integrity.py`) runs on a background thread every 30 seconds (`INTEGRITY_SCAN_SECONDS`, `0` turns it off). It checks each ballot's hash, signature and GCM tag, then the whole chain: sequence gaps, broken links, and the ballot count against tokens marked used in the identity database (this catches a deleted tail).
+- A failing ballot is recorded in `quarantined_ballots` and is no longer counted. The audit log gets `ballot.quarantined` and `ballot.integrity_alert` with the ballot id and reason only.
+- The **Integrity** page (`/integrity`, delegate and auditor) shows scan history and quarantined ballots, with a **Run scan now** button.
+- Demo: `python scripts/tamper_demo.py --try-normally` shows a plain `UPDATE` refused by the trigger, then drops the trigger (as a database admin could) and rewrites a ballot. The next scan quarantines it.
+
+## GR-12 Dual independent tally
+
+- Counter A is `services/tally_primary.py`. Counter B goes in `services/tally_secondary.py` and **must be written by a different team member** without reading or importing counter A (a test checks the imports). Its docstring gives the exact input and output format.
+- `services/tally_gate.py` gives each counter its own copy of the same verified ballots, then checks and compares the two results. Release is blocked if a counter is missing, crashes, returns a malformed result, or disagrees. A disagreement writes a `tally.mismatch` alert to the audit log.
+- The gate runs when the second delegate approves `results.release`. A blocked tally refuses the approval (409); nothing is signed or published.
+- Delegates and auditors see the reason on the Results preview (`release_blocked`, `release_reason`, `tally_differences`).
+- **Until counter B exists, results cannot be published.** This fail-closed behaviour is on purpose. Tests use a stand-in (`second_counter` fixture in `tests/conftest.py`); delete it once the real counter B is written.
+
+Limits to state in the report:
+
+- No HSM. Ballot keys are held outside the databases (environment variables, Docker secrets or `instance/keys/`). Production would use an HSM or cloud KMS.
+- A database admin can still drop the triggers and edit rows, so tampering cannot be prevented, only detected and quarantined.
+- The identity and ballot databases commit through one session without two-phase commit.
+- `BallotToken.used_at` is a precise timestamp and ballots are stored in commit order, so the two orders could be compared to link voters to ballots. Rounding or dropping `used_at` would close this.
+- Counting is first preference only, matching the skeleton.
