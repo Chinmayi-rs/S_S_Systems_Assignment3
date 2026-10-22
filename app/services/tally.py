@@ -7,7 +7,7 @@ def tally_first_preference(election_id):
     GR-12 needs a second function, written by someone else, that does not
     import this one. This skeleton only has the first counter.
     """
-    ballots = ballot_store.read_ballots(election_id)
+    ballots, rejected = ballot_store.read_verified_ballots(election_id)
     house_counts = {}
     senate_counts = {}
     for prefs in ballots:
@@ -18,11 +18,9 @@ def tally_first_preference(election_id):
         party = prefs.get('senate_party')
         if party:
             senate_counts[party] = senate_counts.get(party, 0) + 1
-    return house_counts, senate_counts, len(ballots)
-
-
+    return house_counts, senate_counts, len(ballots), rejected
 def build_results(election):
-    house_counts, senate_counts, total = tally_first_preference(election.id)
+    house_counts, senate_counts, total, rejected = tally_first_preference(election.id)
     house_rows = (
         Candidate.query.filter_by(election_id=election.id, chamber='house')
         .order_by(Candidate.ballot_order, Candidate.id)
@@ -46,6 +44,8 @@ def build_results(election):
     return {
         'election': election.to_dict(),
         'total_ballots': total,
+        #GR-10: ballots that failed re-verification are excluded, never counted.
+        'rejected_ballots': len(rejected),
         'house': house,
         'senate': senate,
         'method': 'first-preference',

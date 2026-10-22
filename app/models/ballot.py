@@ -1,6 +1,9 @@
 from datetime import datetime
 
+from sqlalchemy import event
+
 from app import db
+from app.services import ballot_signing
 
 
 class BallotToken(db.Model):
@@ -57,7 +60,7 @@ class StagedBallot(db.Model):
 
 
 class Ballot(db.Model):
-    """A committed ballot. Encrypted content only."""
+    """A committed ballot. Encrypted content only, signed with the election key (GR-10)."""
 
     __bind_key__ = 'ballot'
     __tablename__ = 'ballots'
@@ -66,6 +69,8 @@ class Ballot(db.Model):
     election_id = db.Column(db.Integer, nullable=False, index=True)
     nonce = db.Column(db.String(24), nullable=False)
     ciphertext = db.Column(db.Text, nullable=False)
+    # GR-10: Ed25519 signature over (scheme, election, id, nonce, ciphertext).
+    signature = db.Column(db.String(88), nullable=False)
     recorded_hour = db.Column(db.DateTime, nullable=False)
 
     def to_public_dict(self):
@@ -75,3 +80,7 @@ class Ballot(db.Model):
             'election_id': self.election_id,
             'recorded_hour': self.recorded_hour.isoformat() if self.recorded_hour else None,
         }
+
+
+# GR-10: no Ballot row reaches the database unless its signature verifies.
+event.listen(Ballot, 'before_insert', ballot_signing.reject_unsigned)

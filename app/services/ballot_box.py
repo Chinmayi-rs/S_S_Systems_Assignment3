@@ -8,6 +8,7 @@ from app import db
 from app.models.ballot import BallotToken
 from app.models.candidate import Candidate
 from app.services import ballot_store
+from app.services.ballot_signing import UnsignedBallotError
 from app.services.elections import current_election
 
 def hash_token(token):
@@ -195,7 +196,12 @@ def commit_ballot(user, raw_token):
     record.status = 'used'
     record.used_at = datetime.utcnow()
     ballot = ballot_store.commit(staged)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except UnsignedBallotError:
+        #GR-10: the storage layer refused the row. Nothing is half-saved.
+        db.session.rollback()
+        return None, ('The ballot could not be sealed. It was not recorded.', 500)
     return {
         'accepted': True,
         'reference': ballot.id,
