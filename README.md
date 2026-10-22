@@ -6,20 +6,91 @@ A small federal-election prototype converted from the class Flask banking templa
 This is a **skeleton**. The voter journey works. The 20 security requirements are
 not implemented yet. The seams they plug into are listed at the bottom.
 
-## Run
+## Run locally
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
+Do the steps in this order. Commands are for PowerShell on Windows; the macOS/Linux version is
+in the comments.
+
+**1. Create the settings file (`.env`).** It holds the secrets and is never committed.
+
+```powershell
+Copy-Item .env.example .env      # macOS/Linux: cp .env.example .env
+```
+
+Open `.env` and replace the `change-me...` values (`SECRET_KEY`, `JWT_SECRET_KEY`,
+`RESULTS_KEY_SECRET`, `DELEGATE_KEY_SECRET`) with long random strings. Make one with:
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Use a different value for each key. Do not keep the example values.
+
+**2. Install the requirements** in a virtual environment.
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1     # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
+```
+
+**3. Start the app.**
+
+```powershell
 python run.py
 ```
 
-The app listens on port 8080. Override with `PORT`.
+The app listens on port 8080 (override with `PORT`): open http://localhost:8080.
 
-```bash
+**4. Get the sign-in code.** Every account needs a 6-digit code, and the code changes every
+30 seconds. In a second terminal (venv active, project root):
+
+```powershell
+python scripts/totp_codes.py             # codes for all seeded accounts
+python scripts/totp_codes.py delegate    # one account
+```
+
+**5. Run the tests** (optional).
+
+```powershell
 pytest
 ```
+
+If you update from an older checkout and see `no such column ...`, stop the app, delete
+`data/identity.db` and `data/ballot.db`, and start it again.
+
+## Run with Docker
+
+Needs Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin. From the project
+root:
+
+```powershell
+docker compose up --build
+```
+
+Open http://localhost:8080 (health check: http://localhost:8080/health). Stop with `Ctrl+C`,
+or `docker compose down` from another terminal.
+
+| Task | Command (while the container is running) |
+| --- | --- |
+| Get the sign-in code for every seeded account | `docker compose exec web python scripts/totp_codes.py` |
+| Code for one account | `docker compose exec web python scripts/totp_codes.py delegate` |
+| Run the tests | `docker compose exec web pytest` |
+| See the app log | `docker compose logs -f web` |
+| Rebuild after changing code or `requirements.txt` | `docker compose up --build` |
+
+Things to know:
+
+- **The database is temporary.** `docker-compose.yml` keeps `/app/data` in memory (`tmpfs`), so
+  every time the container stops or restarts the databases are wiped and the seeded accounts and
+  election are created again. This also means you never need to delete `.db` files when you
+  use Docker.
+- **Docker does not read `.env`.** The secrets in Docker come from the `environment:` block of
+  `docker-compose.yml`, which currently holds example values (`dev-...-change-me`). Change them
+  there before showing or sharing the app, and never reuse them anywhere real.
+- **Do not ship `.env` or `venv/` inside the image.** Add a `.dockerignore` with `.env`, `venv/`,
+  `.venv/`, `.git/`, `data/` and `__pycache__/`; without it `COPY . .` in the `Dockerfile` copies
+  all of them into the image.
 
 ## Seeded desks
 
@@ -36,6 +107,19 @@ below to any authenticator app (Google Authenticator, Aegis, 1Password, or
 | delegate | delegate1234 | `6XJJFZNCSXNGL7B5ZUWDATKXVBBAADXR` | Commissioner's delegate |
 | delegate2 | delegate21234 | `4KP7JD73VZVYRP2NRQN5WCKLNQNHRPRB` | Second commissioner's delegate (two-person approvals) |
 | auditor | auditor1234 | `K2B27OBNXWQSCU6EJOM76DE3TW3PYSQS` | Auditor |
+
+**Getting the 6-digit code.** The code changes every 30 seconds, so it cannot be written in the
+table: a number copied from here would already have expired. Use the command from step 4 of
+"Run locally" (with Docker: `docker compose exec web python scripts/totp_codes.py`), or from the
+project root run
+
+```bash
+python scripts/totp_codes.py             # current code for every seeded account
+python scripts/totp_codes.py delegate    # one account
+python scripts/totp_codes.py --watch     # keeps refreshing until Ctrl+C
+```
+
+and type the code it prints for the account you are signing in with, within the 30 seconds shown.
 
 Accounts registered through the UI enrol their own authenticator with a QR
 code before their first session exists. To demo that flow, just register a
