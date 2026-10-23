@@ -1,10 +1,12 @@
 services:
   web:
     build: .
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     environment:
       PORT: "8080"
+      HOST: "0.0.0.0"
+      FLASK_ENV: production
       SECRET_KEY: dev-secret-change-me
       JWT_SECRET_KEY: dev-jwt-secret-change-me
       RESULTS_KEY_SECRET: dev-results-secret-change-me
@@ -12,6 +14,19 @@ services:
       BALLOT_DATABASE_URL: sqlite:////app/data/ballot.db
     tmpfs:
       - /app/data
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      web:
+        condition: service_healthy
     restart: unless-stopped
 
   # GR-09: replace the sqlite URLs above with these two servers.
