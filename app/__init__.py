@@ -65,8 +65,7 @@ def create_app():
     def expired_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    # GR-02: every verified token is checked against the session table, so an
-    # idle or revoked session is rejected on every endpoint, not per-route.
+    # GR-02: Reject idle or revoked sessions.
     @jwt.token_in_blocklist_loader
     def token_blocked(jwt_header, jwt_payload):
         from app.services.sessions import session_is_blocked
@@ -76,7 +75,18 @@ def create_app():
     def revoked_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    from app.models import approval, audit, ballot, candidate, election, published_result, session, signing, user  # noqa: F401
+    from app.models import (
+        approval,
+        audit,
+        ballot,
+        candidate,
+        election,
+        published_result,
+        session,
+        signing,
+        user,
+    )  # noqa: F401
+
     from app.routes.approvals import approvals_bp
     from app.routes.audit import audit_bp
     from app.routes.auth import auth_bp
@@ -86,6 +96,7 @@ def create_app():
     from app.routes.enrolment import enrolment_bp
     from app.routes.integrity import integrity_bp
     from app.routes.main import main_bp
+    from app.routes.receipts import receipts_bp
     from app.routes.results import results_bp
 
     app.register_blueprint(main_bp)
@@ -105,7 +116,7 @@ def create_app():
         from app.services.seed import seed_if_empty
         seed_if_empty()
 
-    # GR-11: periodic ballot-chain integrity scan (INTEGRITY_SCAN_SECONDS, default 30).
+    # GR-11: Periodic ballot-chain integrity scan.
     from app.services.ballot_integrity import start_background_scan
     start_background_scan(app)
 
