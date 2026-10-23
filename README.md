@@ -3,13 +3,40 @@
 A small federal-election prototype converted from the class Flask banking template
 (Flask, SQLAlchemy, JWT, HTML pages that call a JSON API).
 
-This is a **skeleton**. The voter journey works. The 20 security requirements are
-not implemented yet. The seams they plug into are listed at the bottom.
+The voter journey works and requirements GR-01 to GR-19 are implemented. GR-20 (the anonymous inclusion
+receipt) is the only one still to do. The status of every requirement is listed near the bottom.
 
-## Run locally
+## Quick start (one script)
+
+You need Python 3.11 or newer. Docker Desktop is only needed if you want to run it in Docker.
+From the project folder, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+`setup.ps1` does the whole setup. It is safe to run again, because it never overwrites a key,
+a certificate or a secret you already have:
+
+- creates the virtual environment (`venv`) and installs `requirements.txt`;
+- creates the PII encryption key in `.secrets/pii.key` (GR-18);
+- creates `.env` from `.env.example` and fills in random secrets and the PII key;
+- creates the local HTTPS certificate in `nginx/certs/` (GR-17).
+
+Add `-Run local` to start the app straight after setup, or `-Run docker` to start Docker:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Run local
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Run docker
+```
+
+Do not run the app and Docker at the same time: both use port 8080. The manual steps for each
+are below.
+
+## Run locally (manual steps)
 
 Do the steps in this order. Commands are for PowerShell on Windows; the macOS/Linux version is
-in the comments.
+in the comments. If you used `setup.ps1`, steps 1 and 2 are already done.
 
 **1. Create the settings file (`.env`).** It holds the secrets and is never committed.
 
@@ -25,6 +52,18 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Use a different value for each key. Do not keep the example values.
+
+The app also needs a PII encryption key (GR-18) and will not start without it. Create it once and
+put it in `.env`:
+
+```powershell
+python scripts/generate_pii_key.py
+$k = (Get-Content -Raw .secrets/pii.key).Trim()
+(Get-Content .env) -replace '^PII_ENCRYPTION_KEY=.*', "PII_ENCRYPTION_KEY=$k" | Set-Content .env
+```
+
+Keep `.secrets/pii.key` private and do not delete it: without the key, data that was already
+encrypted cannot be read. The folder is git-ignored.
 
 **2. Install the requirements** in a virtual environment.
 
@@ -56,27 +95,42 @@ python scripts/totp_codes.py delegate    # one account
 pytest
 ```
 
+The tests create their own temporary databases and keys, so they do not touch your `.env` or `data/`.
+
 If you update from an older checkout and see `no such column ...`, stop the app, delete
 `data/identity.db` and `data/ballot.db`, and start it again.
 
 ## Run with Docker
 
-Needs Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin. From the project
-root:
+Needs Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin. In Docker the app
+sits behind nginx, which serves HTTPS with TLS 1.3 only (GR-17).
+
+**Before the first start**, from the project root:
+
+1. Make sure `.env` exists and contains `PII_ENCRYPTION_KEY` (run `setup.ps1`, or follow step 1 of
+   "Run locally"). Docker Compose reads `.env` in the project folder to fill in this value.
+2. Create the local HTTPS certificate once: `python scripts/generate_certificate.py`
+   (`setup.ps1` does this too).
+
+**Start:**
 
 ```powershell
 docker compose up --build
 ```
 
-Open http://localhost:8080 (health check: http://localhost:8080/health). Stop with `Ctrl+C`,
-or `docker compose down` from another terminal.
+**Open the app at https://localhost:8443. Do not use port 443.** The certificate is self-signed, so the browser shows a warning page.
+On that page, click **Advanced**, then **Proceed to localhost**.
 
-| Task | Command (while the container is running) |
+`http://localhost:8080` redirects to the HTTPS address. The health check is https://localhost:8443/health.
+Stop with `Ctrl+C`, or `docker compose down` from another terminal.
+
+| Task | Command (while the containers are running) |
 | --- | --- |
 | Get the sign-in code for every seeded account | `docker compose exec web python scripts/totp_codes.py` |
 | Code for one account | `docker compose exec web python scripts/totp_codes.py delegate` |
 | Run the tests | `docker compose exec web pytest` |
 | See the app log | `docker compose logs -f web` |
+| See the container status | `docker compose ps` |
 | Rebuild after changing code or `requirements.txt` | `docker compose up --build` |
 
 Things to know:
@@ -85,12 +139,16 @@ Things to know:
   every time the container stops or restarts the databases are wiped and the seeded accounts and
   election are created again. This also means you never need to delete `.db` files when you
   use Docker.
-- **Docker does not read `.env`.** The secrets in Docker come from the `environment:` block of
-  `docker-compose.yml`, which currently holds example values (`dev-...-change-me`). Change them
-  there before showing or sharing the app, and never reuse them anywhere real.
-- **Do not ship `.env` or `venv/` inside the image.** Add a `.dockerignore` with `.env`, `venv/`,
-  `.venv/`, `.git/`, `data/` and `__pycache__/`; without it `COPY . .` in the `Dockerfile` copies
-  all of them into the image.
+- **Only nginx is reachable from outside.** The `web` container has no published port, so every
+  request goes through HTTPS. If `docker compose up` says port 8080 is already in use, stop the
+  local app (`python run.py`) first.
+- **Where the settings come from.** Inside the container the app does not read `.env` (the
+  `.dockerignore` keeps it out of the image). The settings come from the `environment:` block of
+  `docker-compose.yml`, and `PII_ENCRYPTION_KEY` is passed in from your `.env`. The other values
+  in that block are examples (`dev-...-change-me`): change them before showing or sharing the app,
+  and never reuse them anywhere real.
+- **Nothing secret goes into the image.** `.dockerignore` excludes `.env`, `.secrets/`,
+  `nginx/certs/`, `venv/`, `.git/` and `data/`.
 
 ## Seeded desks
 
@@ -148,6 +206,12 @@ Delete `data/identity.db` (or the Docker tmpfs restarts clean anyway) so
 - Ballots are encrypted (AES-256-GCM) and signed (Ed25519) before they are stored, and cannot be linked to the voter (GR-09, GR-10).
 - The ballot store is append-only and hash-chained; a background scan every 30 seconds quarantines any ballot that was changed (GR-11).
 - Two independent counters must agree before results can be published (GR-12).
+- Result-affecting actions (close or reopen the poll, withdraw a candidate, publish results) need two different delegates: the proposer picks the approver, and self-approval is refused (GR-14).
+- The audit log is hash-chained and cannot be edited or deleted; the auditor can verify the whole chain (GR-15).
+- Every delegate action is signed with that delegate's own Ed25519 key and can be checked offline (GR-16).
+- In Docker, nginx serves the app over HTTPS with TLS 1.3 only and redirects plain HTTP (GR-17).
+- Voter date of birth and address are encrypted at rest; the key is kept outside the database (GR-18).
+- GitHub Actions runs the tests, a Bandit scan and a dependency audit on every push and pull request (GR-19).
 
 House counting is first preference only. Senate is above-the-line only. Full preferential distribution and STV are out of this skeleton on purpose.
 
@@ -160,6 +224,10 @@ app/
   services/        ballot box, tally, audit, seed
   utils/rbac.py    permission map (deny if the role is not listed)
 templates/         pages
+security/          PII encryption (GR-18)
+nginx/             HTTPS settings (GR-17); certificates are generated into nginx/certs/
+scripts/           key and certificate generators, sign-in codes, offline verifiers, tamper demo
+.github/workflows/ CI pipeline (GR-19)
 static/js          same fetch + Bearer token pattern as the banking template
 data/              identity.db and ballot.db (created on first run)
 ```
@@ -205,32 +273,30 @@ Two SQLite files stand in for the two databases:
 | GET | /api/integrity | delegate, auditor: scan history and quarantined ballots (GR-11) |
 | POST | /api/integrity/scan | delegate, auditor: run the integrity scan now (GR-11) |
 
-## Where the 20 requirements plug in
+## Status of the 20 requirements
 
-Not built yet. Do not treat the notes below as the implementation.
-
-| ID | Extend |
+| ID | Status |
 | --- | --- |
 | GR-01 | Done: Argon2id in `models/user.py`, TOTP + lockout + attempt log in `routes/auth.py`, enrolment UI at `/mfa-setup` (see below). |
 | GR-02 | Done: `models/session.py` + `services/sessions.py`; the blocklist hook in `app/__init__.py` idle-expires every endpoint (see below). |
 | GR-03 | Done: deny-by-default `PERMISSIONS` map in `utils/rbac.py`, audited denials, `/api/auth/permissions`, and a test that walks every API route (see below). |
 | GR-04 | Done: delegate-only create/update/reorder with before/after audit rows, input bounds, and deletion explicitly refused (see below). |
-| GR-05 | `services/ballot_box.py` `issue_token` and `commit_ballot`, together with `users.has_voted`. |
-| GR-06 | Token hash split is already the shape. Still need unlinkability review. |
-| GR-07 | `services/audit_log.py`. Ballot commit already omits actor and preferences. |
-| GR-08 | `templates/vote.html` review step and stage/commit. |
-| GR-09 | Done: `services/ballot_crypto.py`, `ballot_store.py`, `ballot_keys.py`. AES-256-GCM, HMAC token tag, separate staged and committed tables (see below). |
-| GR-10 | Done: `services/ballot_signing.py`. Ed25519 at encryption, refused before insert if invalid, re-verified at tally (see below). |
-| GR-11 | Done: `services/ballot_chain.py`, `ballot_integrity.py`, `/integrity` page. Append-only triggers, hash chain, scan every 30 s (see below). |
-| GR-12 | Counter A and the gate are done (`tally_primary.py`, `tally_gate.py`), enforced at result release. Counter B (`tally_secondary.py`) must be written by another member (see below). |
+| GR-05 | Done: eligibility checks and an atomic double-vote guard in `services/ballot_box.py` (`issue_token`, `commit_ballot`). |
+| GR-06 | Done: single-use token; the two databases hold different values for it (see GR-09). |
+| GR-07 | Done: the ballot commit is logged with no voter and no preferences (`services/audit_log.py`). |
+| GR-08 | Done: stage, review, commit flow in `templates/vote.html` and `services/ballot_box.py`. |
+| GR-09 | Done: `services/ballot_crypto.py`, `ballot_store.py`, `ballot_keys.py` (see below). |
+| GR-10 | Done: `services/ballot_signing.py` (see below). |
+| GR-11 | Done: `services/ballot_chain.py`, `ballot_integrity.py`, `/integrity` page (see below). |
+| GR-12 | Done: counter A (`tally_primary.py`), counter B (`tally_secondary.py`, written independently) and the gate (`tally_gate.py`) (see below). |
 | GR-13 | Done: `services/results_publication.py`, `routes/results.py`, `scripts/verify_results.py` (see below). |
-| GR-14 | New approvals table in front of close / exclude / publish. |
-| GR-15 | Hash-chain `AuditEvent` in `services/audit_log.py`. |
-| GR-16 | Per-delegate signing key, stored with the audit row. |
-| GR-17 | nginx in `docker-compose.yml`. The app itself is still plain HTTP. |
-| GR-18 | `date_of_birth` and `address` on `User` are still plaintext. |
-| GR-19 | `tests/test_flow.py` is the start. CI workflow is not added. |
-| GR-20 | `commit` returns a reference id, not a hash of ciphertext. |
+| GR-14 | Done: `services/approvals.py`, `routes/approvals.py`, `models/approval.py`. |
+| GR-15 | Done: `services/audit_chain.py`, `services/audit_log.py`, `routes/audit.py`. |
+| GR-16 | Done: `services/action_signing.py`, `scripts/verify_proof.py`. |
+| GR-17 | Done: `nginx/default.conf` (TLS 1.3 only, HTTP redirect), `scripts/generate_certificate.py` (see below). |
+| GR-18 | Done: `security/pii_crypto.py` and the encrypted columns in `models/user.py` (see below). |
+| GR-19 | Done: `.github/workflows/security-ci.yml` (tests, Bandit, pip-audit). |
+| GR-20 | Not done yet: `commit` returns a reference id, not a receipt hash. |
 
 ## GR-03 Role-based access control (deny by default)
 
@@ -339,11 +405,11 @@ Limits to state in the report:
 
 ## GR-12 Dual independent tally
 
-- Counter A is `services/tally_primary.py`. Counter B goes in `services/tally_secondary.py` and **must be written by a different team member** without reading or importing counter A (a test checks the imports). Its docstring gives the exact input and output format.
+- Counter A is `services/tally_primary.py`. Counter B is `services/tally_secondary.py`, written by a different team member without reading or importing counter A (a test checks the imports). Its docstring gives the exact input and output format.
 - `services/tally_gate.py` gives each counter its own copy of the same verified ballots, then checks and compares the two results. Release is blocked if a counter is missing, crashes, returns a malformed result, or disagrees. A disagreement writes a `tally.mismatch` alert to the audit log.
 - The gate runs when the second delegate approves `results.release`. A blocked tally refuses the approval (409); nothing is signed or published.
 - Delegates and auditors see the reason on the Results preview (`release_blocked`, `release_reason`, `tally_differences`).
-- **Until counter B exists, results cannot be published.** This fail-closed behaviour is on purpose. Tests use a stand-in (`second_counter` fixture in `tests/conftest.py`); delete it once the real counter B is written.
+- **Fail closed.** If a counter is ever missing or broken, results cannot be published. Tests that need a missing counter simulate it with `monkeypatch`.
 
 Limits to state in the report:
 
@@ -352,3 +418,20 @@ Limits to state in the report:
 - The identity and ballot databases commit through one session without two-phase commit.
 - `BallotToken.used_at` is a precise timestamp and ballots are stored in commit order, so the two orders could be compared to link voters to ballots. Rounding or dropping `used_at` would close this.
 - Counting is first preference only, matching the skeleton.
+
+## GR-17 HTTPS with TLS 1.3
+
+- nginx (`nginx/default.conf`) terminates TLS and forwards requests to the `web` container. Only **TLS 1.3** is enabled and session tickets are off.
+- Plain HTTP on `http://localhost:8080` answers `308` and redirects to `https://localhost:8443`.
+- `scripts/generate_certificate.py` creates a self-signed certificate for `localhost` in `nginx/certs/`. The folder is mounted read-only into nginx, and it is git-ignored and kept out of the Docker image.
+- Open the app at `https://localhost:8443` (not port 443). The browser warns about the self-signed certificate: click **Advanced**, then **Proceed to localhost**.
+
+Limits to state in the report: the certificate is self-signed, so a real deployment needs one from a trusted authority. TLS protects traffic between the browser and nginx; the hop from nginx to the app stays inside Docker's private network.
+
+## GR-18 Voter PII encryption at rest
+
+- `security/pii_crypto.py` encrypts each voter's `date_of_birth` and `address` before they are saved, and decrypts them when the `User` model reads them.
+- Each user has their own `pii_context_id`, which is bound into the encryption, so a value copied into another user's row does not decrypt.
+- The key is supplied through `PII_ENCRYPTION_KEY` (a Base64 32-byte key). The app will not start without it. Create one with `python scripts/generate_pii_key.py`; it is saved to `.secrets/pii.key`.
+- The identity database holds only the encrypted text (`date_of_birth_encrypted`, `address_encrypted`).
+- Tests are in `tests/test_pii_crypto.py`.

@@ -1,3 +1,4 @@
+import base64
 import os
 import tempfile
 
@@ -17,6 +18,8 @@ def isolated_ballot_keys(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     # The background integrity scan would race the tests; they call it directly.
     monkeypatch.setenv('INTEGRITY_SCAN_SECONDS', '0')
+    # GR-18: the app refuses to start without a PII key, so every test gets a throwaway one.
+    monkeypatch.setenv('PII_ENCRYPTION_KEY', base64.b64encode(os.urandom(32)).decode())
     ballot_keys.clear_cache()
     yield
     ballot_keys.clear_cache()
