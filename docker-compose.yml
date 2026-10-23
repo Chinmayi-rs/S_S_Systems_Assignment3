@@ -2,8 +2,9 @@ services:
   web:
     build: .
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
+      HOST: "0.0.0.0"
       PORT: "8080"
       SECRET_KEY: dev-secret-change-me
       JWT_SECRET_KEY: dev-jwt-secret-change-me
