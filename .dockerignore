@@ -1,0 +1,8 @@
+.venv/
+.env
+.secrets/
+.git/
+__pycache__/
+.pytest_cache/
+nginx/certs/
+data/
