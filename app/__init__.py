@@ -109,6 +109,7 @@ def create_app():
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
     app.register_blueprint(approvals_bp, url_prefix='/api/approvals')
     app.register_blueprint(integrity_bp, url_prefix='/api/integrity')
+    app.register_blueprint(receipts_bp, url_prefix='/api/receipts')
     from app.utils.tls_guard import install_tls_guard
     install_tls_guard(app)
     with app.app_context():
