@@ -20,12 +20,15 @@ PUBLIC_API = {
     ('/api/auth/login', 'POST'),
     ('/api/candidates', 'GET'),
     ('/api/elections/current', 'GET'),
-    ('/api/results', 'GET'),           # guarded by publication state, not auth
+    ('/api/results', 'GET'),
     ('/api/results/public-key', 'GET'),
     ('/api/results/verify', 'GET'),
-    ('/api/ballots/public-key', 'GET'),  #GR-10: ballot verify key, public by design
-}
+    ('/api/ballots/public-key', 'GET'),
 
+    # GR-20: public receipt checking, guarded by election closure.
+    ('/api/receipts/published/1', 'GET'),
+    ('/api/receipts/check', 'POST'),
+}
 
 @pytest.fixture()
 def ctx():
