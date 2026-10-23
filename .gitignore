@@ -5,3 +5,6 @@ __pycache__/
 .env
 data/*.db
 instance/
+nginx/certs/
+.secrets/
+data/*.db-*

@@ -62,6 +62,14 @@ function updateChrome() {
   if (auditLink) {
     auditLink.hidden = !(authUser && authUser.role === 'auditor');
   }
+  const approvalsLink = document.getElementById('approvals-link');
+  if (approvalsLink) {
+    approvalsLink.hidden = !(authUser && (authUser.role === 'commissioner_delegate' || authUser.role === 'auditor'));
+  }
+  const integrityLink = document.getElementById('integrity-link');
+  if (integrityLink) {
+    integrityLink.hidden = !(authUser && ['auditor', 'commissioner_delegate'].includes(authUser.role));
+  }
 }
 
 function showAlert(message, type) {
@@ -77,7 +85,7 @@ function showAlert(message, type) {
 async function apiRequest(url, options) {
   const opts = options || {};
   const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-  if (authToken) headers.Authorization = 'Bearer ' + authToken;
+  if (authToken && !headers.Authorization) headers.Authorization = 'Bearer ' + authToken;
   const response = await fetch('/api' + url, {
     method: opts.method || 'GET',
     headers: headers,
@@ -93,6 +101,14 @@ async function apiRequest(url, options) {
     }
   }
   if (!response.ok) {
+    // GR-02: a 401 on a stored session means it idle-expired or was revoked.
+    if (response.status === 401 && authToken) {
+      clearSession();
+      showAlert(data.error || 'Your session has expired. Sign in again.', 'danger');
+      window.setTimeout(() => {
+        window.location.href = '/login';
+      }, 900);
+    }
     const error = new Error(data.error || 'Request failed');
     error.status = response.status;
     throw error;

@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const toggle = document.createElement('button');
       toggle.className = 'btn';
       toggle.type = 'button';
-      toggle.textContent = 'Close polls';
+      toggle.textContent = 'Propose: close polls';
       const candidates = document.createElement('a');
       candidates.className = 'btn secondary';
       candidates.href = '/candidates';
@@ -58,25 +58,95 @@ document.addEventListener('DOMContentLoaded', async () => {
       const election = electionData.election;
       pollLine.textContent =
         election.name + ' is ' + election.status + ' in ' + election.division + '.';
-      toggle.textContent = election.status === 'open' ? 'Close polls' : 'Reopen polls';
+      toggle.textContent = election.status === 'open' ? 'Propose: close polls' : 'Propose: reopen polls';
+      const approvals = document.createElement('a');
+      approvals.className = 'btn secondary';
+      approvals.href = '/approvals';
+      approvals.textContent = 'Approvals';
+      actions.append(approvals);
+
+      // GR-14: the proposer chooses which delegate must approve
+      const choice = document.createElement('div');
+      const choiceLabel = document.createElement('label');
+      choiceLabel.setAttribute('for', 'poll-approver');
+      choiceLabel.textContent = 'Send the request to';
+      const approver = document.createElement('select');
+      approver.id = 'poll-approver';
+      choice.append(choiceLabel, approver);
+      actions.insertBefore(choice, toggle);
+      const others = await loadApproverChoices(approver);
+      const waitingRequests = await loadWaitingRequests();
+      const waiting = waitingRequests.find((request) => request.action_type === 'election.status');
+      const waitingRelease = waitingRequests.find((request) => request.action_type === 'results.release');
+      const published = (await apiRequest('/results')).published === true;
+
+      // GR-13: publishing the signed results is a second two-delegate action, sent to the same chosen approver
+      const publish = document.createElement('button');
+      publish.className = 'btn';
+      publish.type = 'button';
+      publish.textContent = 'Propose: publish results';
+      actions.insertBefore(publish, candidates);
+
+      const waitingFor = (request) => (request.approver_id === user.id ? 'you (open Approvals to decide)' : request.approver_username);
+      const syncApprover = () => { approver.disabled = toggle.disabled && publish.disabled; };
+
+      if (waiting) {
+        toggle.disabled = true;
+        pollLine.textContent += ' Request #' + waiting.id + ' is waiting for ' + waitingFor(waiting)
+          + '. No new request can be sent until it is decided.';
+      } else if (!others) {
+        toggle.disabled = true;
+        pollLine.textContent += ' There is no other delegate to approve a request.';
+      }
+
+      if (published) {
+        toggle.disabled = true;
+        publish.disabled = true;
+        publish.textContent = 'Results published';
+        pollLine.textContent += ' The results are published and signed, so the poll stays closed.';
+      } else if (election.status !== 'closed') {
+        publish.disabled = true;
+        pollLine.textContent += ' Results can be published once the poll is closed.';
+      } else if (waitingRelease) {
+        publish.disabled = true;
+        toggle.disabled = true;  // nobody can reopen the poll while the publish request is waiting
+        pollLine.textContent += ' Publishing request #' + waitingRelease.id + ' is waiting for ' + waitingFor(waitingRelease)
+          + '. The poll cannot be reopened until it is decided.';
+      } else if (!others) {
+        publish.disabled = true;
+      }
+      syncApprover();
+
       toggle.addEventListener('click', async () => {
         toggle.disabled = true;
         try {
           const next = election.status === 'open' ? 'closed' : 'open';
-          const updated = await apiRequest('/elections/current/status', {
+          const result = await apiRequest('/approvals', {
             method: 'POST',
-            body: JSON.stringify({ status: next }),
+            body: JSON.stringify({ action_type: 'election.status', status: next, approver_id: Number(approver.value) }),
           });
-          election.status = updated.election.status;
-          pollLine.textContent =
-            updated.election.name + ' is ' + updated.election.status + ' in ' + updated.election.division + '.';
-          toggle.textContent = updated.election.status === 'open' ? 'Close polls' : 'Reopen polls';
-          showAlert('Election is now ' + updated.election.status + '.', 'success');
+          showAlert('Request #' + result.approval.id + ' sent to ' + result.approval.approver_username + '. Only that delegate can approve or reject it.', 'success');
         } catch (err) {
           showAlert(err.message, 'danger');
-        } finally {
           toggle.disabled = false;
         }
+        syncApprover();
+      });
+
+      publish.addEventListener('click', async () => {
+        publish.disabled = true;
+        try {
+          const result = await apiRequest('/approvals', {
+            method: 'POST',
+            body: JSON.stringify({ action_type: 'results.release', approver_id: Number(approver.value) }),
+          });
+          showAlert('Request #' + result.approval.id + ' to publish the results was sent to ' + result.approval.approver_username
+            + '. Nothing is public until that delegate approves it.', 'success');
+        } catch (err) {
+          showAlert(err.message, 'danger');
+          publish.disabled = false;
+        }
+        syncApprover();
       });
     } else if (user.role === 'auditor') {
       actions.innerHTML = '<h2>Audit</h2><p>Read the record of administrative actions. Vote content is not stored here.</p>';

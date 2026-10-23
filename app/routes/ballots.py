@@ -2,7 +2,13 @@ from flask import Blueprint, jsonify, request
 
 from app import db
 from app.services.audit_log import append_audit
-from app.services.ballot_box import commit_ballot, issue_token, stage_ballot, voter_status
+from app.services.ballot_keys import public_key_pem
+from app.services.ballot_box import (
+    commit_ballot,
+    issue_token,
+    stage_ballot,
+    voter_status,
+)
 from app.utils.rbac import require_permission
 
 ballots_bp = Blueprint('ballots', __name__)
@@ -53,10 +59,29 @@ def commit(current_user):
     if error:
         message, code = error
         return jsonify({'error': message}), code
-    # No actor and no preferences: the log must not link a person to a vote.
-    append_audit('ballot.committed', f"Ballot accepted for election {payload['election_id']}")
+
+    # Keep voter identity, receipt and preferences out of the audit entry.
+    append_audit(
+        'ballot.committed',
+        f"Ballot accepted for election {payload['election_id']}",
+    )
     db.session.commit()
-    return jsonify({
+
+    response = jsonify({
         'message': 'Ballot accepted',
         'reference': payload['reference'],
-    }), 201
+        'election_id': payload['election_id'],
+        'receipt': payload['receipt'],
+        'receipt_algorithm': payload['receipt_algorithm'],
+    })
+    response.headers['Cache-Control'] = 'no-store'
+    return response, 201
+
+
+@ballots_bp.route('/public-key', methods=['GET'])
+def public_key():
+    """GR-10: public key for checking ballot signatures."""
+    return jsonify({
+        'algorithm': 'Ed25519',
+        'public_key_pem': public_key_pem(),
+    }), 200

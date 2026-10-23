@@ -6,10 +6,18 @@
 <p class="kicker">Auditor</p>
 <h1>Administrative log</h1>
 <p class="lede">Privileged actions are listed here. A committed ballot is recorded without the voter and without the preferences.</p>
+<div class="card">
+    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <button id="verify-chain-btn" class="btn" type="button">Verify audit chain</button>
+        <button id="verify-sig-btn" class="btn secondary" type="button">Verify signatures</button>
+    </div>
+    <p id="verify-chain-result" role="status"></p>
+    <p id="verify-sig-result" role="status"></p>
+</div>
 <div class="card table-wrap">
     <table>
         <thead>
-            <tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr>
+            <tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th><th>Signature</th></tr>
         </thead>
         <tbody id="audit-rows"></tbody>
     </table>

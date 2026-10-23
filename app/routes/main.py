@@ -18,6 +18,11 @@ def register_page():
     return render_template('register.html')
 
 
+@main_bp.route('/mfa-setup')
+def mfa_setup_page():
+    return render_template('mfa_setup.html')
+
+
 @main_bp.route('/dashboard')
 def dashboard():
     return render_template('dashboard.html')
@@ -47,6 +52,14 @@ def results_page():
 def audit_page():
     return render_template('audit.html')
 
+
+@main_bp.route('/approvals')
+def approvals_page():
+    return render_template('approvals.html')
+
+@main_bp.route('/integrity')
+def integrity_page():
+    return render_template('integrity.html')
 
 @main_bp.route('/health')
 def health_check():
