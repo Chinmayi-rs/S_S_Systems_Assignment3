@@ -7,6 +7,7 @@ services:
       PORT: "8080"
       HOST: "0.0.0.0"
       FLASK_ENV: production
+      PII_ENCRYPTION_KEY: "${PII_ENCRYPTION_KEY:?Missing PII key}"
       SECRET_KEY: dev-secret-change-me
       JWT_SECRET_KEY: dev-jwt-secret-change-me
       RESULTS_KEY_SECRET: dev-results-secret-change-me

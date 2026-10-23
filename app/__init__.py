@@ -7,6 +7,8 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_sqlalchemy import SQLAlchemy
 
+from security.pii_crypto import PIICipher
+
 load_dotenv()
 
 db = SQLAlchemy()
@@ -42,6 +44,8 @@ def create_app():
     }
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+    app.extensions["pii_cipher"] = PIICipher.from_environment()
+    
     db.init_app(app)
     jwt.init_app(app)
     CORS(app)
