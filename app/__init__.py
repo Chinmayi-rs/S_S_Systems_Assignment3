@@ -26,17 +26,35 @@ def create_app():
     identity_default = 'sqlite:///' + os.path.join(data_dir, 'identity.db')
     ballot_default = 'sqlite:///' + os.path.join(data_dir, 'ballot.db')
 
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
-    # GR-02: the JWT lifetime is only an absolute cap. The effective limit is
-    # the inactivity window checked against user_sessions on every request.
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=int(os.environ.get('JWT_MAX_HOURS', '12')))
-    app.config['SESSION_IDLE_MINUTES'] = int(os.environ.get('SESSION_IDLE_MINUTES', '15'))
-    app.config['MFA_SETUP_TOKEN_MINUTES'] = int(os.environ.get('MFA_SETUP_TOKEN_MINUTES', '10'))
-    # GR-01: lock the account for 15 minutes after 5 consecutive failures.
-    app.config['LOGIN_LOCKOUT_THRESHOLD'] = int(os.environ.get('LOGIN_LOCKOUT_THRESHOLD', '5'))
-    app.config['LOGIN_LOCKOUT_MINUTES'] = int(os.environ.get('LOGIN_LOCKOUT_MINUTES', '15'))
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('IDENTITY_DATABASE_URL', identity_default)
+    app.config['SECRET_KEY'] = os.environ.get(
+        'SECRET_KEY', 'dev-secret-key-change-in-production'
+    )
+    app.config['JWT_SECRET_KEY'] = os.environ.get(
+        'JWT_SECRET_KEY', 'jwt-secret-change-in-production'
+    )
+
+    # GR-02: Session inactivity is checked separately on every request.
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(
+        hours=int(os.environ.get('JWT_MAX_HOURS', '12'))
+    )
+    app.config['SESSION_IDLE_MINUTES'] = int(
+        os.environ.get('SESSION_IDLE_MINUTES', '15')
+    )
+    app.config['MFA_SETUP_TOKEN_MINUTES'] = int(
+        os.environ.get('MFA_SETUP_TOKEN_MINUTES', '10')
+    )
+
+    # GR-01: Account lockout after consecutive login failures.
+    app.config['LOGIN_LOCKOUT_THRESHOLD'] = int(
+        os.environ.get('LOGIN_LOCKOUT_THRESHOLD', '5')
+    )
+    app.config['LOGIN_LOCKOUT_MINUTES'] = int(
+        os.environ.get('LOGIN_LOCKOUT_MINUTES', '15')
+    )
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+        'IDENTITY_DATABASE_URL', identity_default
+    )
     app.config['SQLALCHEMY_BINDS'] = {
         'ballot': os.environ.get('BALLOT_DATABASE_URL', ballot_default),
     }
@@ -58,8 +76,7 @@ def create_app():
     def expired_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    # GR-02: every verified token is checked against the session table, so an
-    # idle or revoked session is rejected on every endpoint, not per-route.
+    # GR-02: Reject idle or revoked sessions.
     @jwt.token_in_blocklist_loader
     def token_blocked(jwt_header, jwt_payload):
         from app.services.sessions import session_is_blocked
@@ -69,7 +86,18 @@ def create_app():
     def revoked_token(header, payload):
         return jsonify({'error': 'Session expired. Sign in again.'}), 401
 
-    from app.models import approval, audit, ballot, candidate, election, published_result, session, signing, user  # noqa: F401
+    from app.models import (
+        approval,
+        audit,
+        ballot,
+        candidate,
+        election,
+        published_result,
+        session,
+        signing,
+        user,
+    )  # noqa: F401
+
     from app.routes.approvals import approvals_bp
     from app.routes.audit import audit_bp
     from app.routes.auth import auth_bp
@@ -79,6 +107,7 @@ def create_app():
     from app.routes.enrolment import enrolment_bp
     from app.routes.integrity import integrity_bp
     from app.routes.main import main_bp
+    from app.routes.receipts import receipts_bp
     from app.routes.results import results_bp
 
     app.register_blueprint(main_bp)
@@ -91,12 +120,16 @@ def create_app():
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
     app.register_blueprint(approvals_bp, url_prefix='/api/approvals')
     app.register_blueprint(integrity_bp, url_prefix='/api/integrity')
+
+    # GR-20: Public inclusion receipts, available after election closure.
+    app.register_blueprint(receipts_bp, url_prefix='/api/receipts')
+
     with app.app_context():
         db.create_all()
         from app.services.seed import seed_if_empty
         seed_if_empty()
 
-    # GR-11: periodic ballot-chain integrity scan (INTEGRITY_SCAN_SECONDS, default 30).
+    # GR-11: Periodic ballot-chain integrity scan.
     from app.services.ballot_integrity import start_background_scan
     start_background_scan(app)
 
