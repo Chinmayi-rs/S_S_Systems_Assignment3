@@ -2,15 +2,20 @@ import base64
 import io
 
 import qrcode
+import qrcode.image.svg
 from flask import jsonify
 
 
 def qr_data_uri(text):
-    """PNG QR code as a data URI, for the TOTP enrolment screen (GR-01)."""
-    image = qrcode.make(text)
+    """SVG QR code as a data URI, for the TOTP enrolment screen (GR-01).
+
+    SVG stays inside the qrcode package. The PNG path needs Pillow, and that
+    dependency currently fails the GR-19 vulnerability audit.
+    """
+    image = qrcode.make(text, image_factory=qrcode.image.svg.SvgPathImage)
     buffer = io.BytesIO()
     image.save(buffer)
-    return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
+    return 'data:image/svg+xml;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
 
 
 def json_error(message, status):

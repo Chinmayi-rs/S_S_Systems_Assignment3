@@ -150,7 +150,7 @@ def test_registration_requires_totp_enrolment_before_any_access(ctx):
     setup = client.post('/api/auth/mfa/setup', headers=provisional)
     assert setup.status_code == 200
     payload = setup.get_json()
-    assert payload['qr'].startswith('data:image/png;base64,')
+    assert payload['qr'].startswith('data:image/svg+xml;base64,')
     assert payload['otpauth_uri'].startswith('otpauth://totp/')
 
     wrong = client.post('/api/auth/mfa/enable', json={'totp_code': '000000'}, headers=provisional)

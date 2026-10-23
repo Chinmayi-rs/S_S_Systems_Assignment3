@@ -6,129 +6,181 @@ A small federal-election prototype converted from the class Flask banking templa
 The voter journey works and requirements GR-01 to GR-19 are implemented. GR-20 (the anonymous inclusion
 receipt) is the only one still to do. The status of every requirement is listed near the bottom.
 
-## Quick start (one script)
+## Quick start (Windows)
 
-You need Python 3.11 or newer. Docker Desktop is only needed if you want to run it in Docker.
-From the project folder, in PowerShell:
+You need Python 3.11 or newer. Pick **one** of the two ways below. Do not run both at the same time: both use port 8080.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1
-```
+`setup.ps1` is Windows-only and safe to run again. It never overwrites a key, a certificate or a secret you already have. It creates `venv`, installs `requirements.txt`, writes the PII key to `.secrets/pii.key` (GR-18), fills `.env`, and creates the HTTPS certificate in `nginx/certs/` (GR-17).
 
-`setup.ps1` does the whole setup. It is safe to run again, because it never overwrites a key,
-a certificate or a secret you already have:
+On macOS or Linux, `setup.ps1` will not run. Use [Run locally (manual steps)](#run-locally-manual-steps) or [Run with Docker](#run-with-docker).
 
-- creates the virtual environment (`venv`) and installs `requirements.txt`;
-- creates the PII encryption key in `.secrets/pii.key` (GR-18);
-- creates `.env` from `.env.example` and fills in random secrets and the PII key;
-- creates the local HTTPS certificate in `nginx/certs/` (GR-17).
+### Run local
 
-Add `-Run local` to start the app straight after setup, or `-Run docker` to start Docker:
+Plain HTTP at http://localhost:8080. No Docker.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Run local
+```
+
+That sets the project up and starts the app in this window. Stop it with `Ctrl+C`.
+
+To set up first and start later, run `setup.ps1` with no `-Run`, then in the same folder:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python run.py
+```
+
+`setup.ps1` does not activate the virtual environment in the window you launched it from. `python run.py` without that `Activate` uses system Python and fails.
+
+### Run Docker
+
+HTTPS with TLS 1.3 at https://localhost:8443. Needs Docker Desktop running. Do not use port 443. The certificate is self-signed: click **Advanced**, then **Proceed to localhost**. `http://localhost:8080` only redirects to that HTTPS address.
+
+Stop `python run.py` first if it is already running.
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Run docker
 ```
 
-Do not run the app and Docker at the same time: both use port 8080. The manual steps for each
-are below.
+Stop the containers with `Ctrl+C`, or `docker compose down` from another terminal.
 
 ## Run locally (manual steps)
 
-Do the steps in this order. Commands are for PowerShell on Windows; the macOS/Linux version is
-in the comments. If you used `setup.ps1`, steps 1 and 2 are already done.
+Do these steps in this order, from the project folder. `scripts/generate_pii_key.py` and
+`scripts/generate_certificate.py` import `cryptography`, so they fail if you run them before
+`pip install`.
 
-**1. Create the settings file (`.env`).** It holds the secrets and is never committed.
+**1. Create a virtual environment and install the requirements.**
+
+PowerShell:
 
 ```powershell
-Copy-Item .env.example .env      # macOS/Linux: cp .env.example .env
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-Open `.env` and replace the `change-me...` values (`SECRET_KEY`, `JWT_SECRET_KEY`,
-`RESULTS_KEY_SECRET`, `DELEGATE_KEY_SECRET`) with long random strings. Make one with:
+macOS / Linux:
 
-```powershell
-python -c "import secrets; print(secrets.token_hex(32))"
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-Use a different value for each key. Do not keep the example values.
+If a `venv` folder is already in the project but it was created on another operating system
+(for example a Windows `venv\Scripts` tree checked out on Linux), delete that folder and
+create it again. A venv cannot be copied between operating systems.
 
-The app also needs a PII encryption key (GR-18) and will not start without it. Create it once and
-put it in `.env`:
+**2. Create `.env` and the PII key.** The app will not start without `PII_ENCRYPTION_KEY`.
+
+PowerShell:
 
 ```powershell
+Copy-Item .env.example .env
 python scripts/generate_pii_key.py
 $k = (Get-Content -Raw .secrets/pii.key).Trim()
 (Get-Content .env) -replace '^PII_ENCRYPTION_KEY=.*', "PII_ENCRYPTION_KEY=$k" | Set-Content .env
 ```
 
-Keep `.secrets/pii.key` private and do not delete it: without the key, data that was already
-encrypted cannot be read. The folder is git-ignored.
+macOS / Linux:
 
-**2. Install the requirements** in a virtual environment.
-
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1     # macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
+```bash
+cp .env.example .env
+python scripts/generate_pii_key.py
+k=$(tr -d '[:space:]' < .secrets/pii.key)
+perl -i -pe 's/^PII_ENCRYPTION_KEY=.*/PII_ENCRYPTION_KEY='"$k"'/' .env
 ```
 
-**3. Start the app.**
+Then replace every remaining `change-me` value in `.env` (`SECRET_KEY`, `JWT_SECRET_KEY`,
+`RESULTS_KEY_SECRET`, `DELEGATE_KEY_SECRET`) with a different long random string:
 
-```powershell
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Keep `.secrets/pii.key` private and do not delete it. Without that key, data that was already
+encrypted cannot be read. Both `.env` and `.secrets/` are git-ignored.
+
+Ballot encryption keys are created automatically in `instance/keys/` the first time the app
+starts, unless you set `BALLOT_ENC_KEY`, `BALLOT_TAG_KEY` and `BALLOT_SIGNING_KEY`.
+
+**3. Start the app** with the virtual environment still active, from the project folder:
+
+```bash
 python run.py
 ```
 
-The app listens on port 8080 (override with `PORT`): open http://localhost:8080.
+The process listens on `127.0.0.1` and port 8080 (`HOST` and `PORT` override those).
+Open http://localhost:8080. This local process is plain HTTP. TLS is the Docker path below.
 
-**4. Get the sign-in code.** Every account needs a 6-digit code, and the code changes every
-30 seconds. In a second terminal (venv active, project root):
+**4. Get the sign-in code.** Every account needs a password and a 6-digit code. The code
+changes every 30 seconds. In a second terminal, activate the same virtual environment and
+run, from the project folder:
 
-```powershell
+```bash
 python scripts/totp_codes.py             # codes for all seeded accounts
 python scripts/totp_codes.py delegate    # one account
+python scripts/totp_codes.py --watch     # refresh until Ctrl+C
 ```
 
-**5. Run the tests** (optional).
+**5. Run the tests** (optional), still from the project folder with the venv active:
 
-```powershell
-pytest
+```bash
+python -m pytest
 ```
 
-The tests create their own temporary databases and keys, so they do not touch your `.env` or `data/`.
+The tests create their own temporary databases and a throwaway PII key. They do not use your
+`.env` or `data/`.
 
-If you update from an older checkout and see `no such column ...`, stop the app, delete
-`data/identity.db` and `data/ballot.db`, and start it again.
+The first local start creates `data/identity.db` and `data/ballot.db`. If you update from an
+older checkout and see `no such column ...`, stop the app, delete those two files, and start
+again.
 
 ## Run with Docker
 
-Needs Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin. In Docker the app
-sits behind nginx, which serves HTTPS with TLS 1.3 only (GR-17).
+Needs Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin. nginx serves
+HTTPS with TLS 1.3 only (GR-17). The Flask process inside the container is not published.
 
-**Before the first start**, from the project root:
+**Before the first start**, from the project folder:
 
-1. Make sure `.env` exists and contains `PII_ENCRYPTION_KEY` (run `setup.ps1`, or follow step 1 of
-   "Run locally"). Docker Compose reads `.env` in the project folder to fill in this value.
-2. Create the local HTTPS certificate once: `python scripts/generate_certificate.py`
-   (`setup.ps1` does this too).
+1. Install the requirements (step 1 above) or run `setup.ps1` on Windows. The certificate
+   script needs `cryptography`.
+2. Create `.env` with a real `PII_ENCRYPTION_KEY` (step 2 above). Compose reads that one
+   variable from `.env` in the project folder. If it is missing, `docker compose` stops with
+   `Missing PII key`. The container does **not** load the rest of `.env`. `SECRET_KEY`,
+   `JWT_SECRET_KEY` and `RESULTS_KEY_SECRET` come from the `environment:` block in
+   `docker-compose.yml` (the `dev-...-change-me` values). Change those in the compose file
+   before you show or share the app. `DELEGATE_KEY_SECRET` is not passed in; the container
+   uses the built-in development default.
+3. Create the certificate once (skip this if `setup.ps1` already did it):
 
-**Start:**
+```bash
+python scripts/generate_certificate.py
+```
 
-```powershell
+That writes `nginx/certs/localhost.crt` and `nginx/certs/localhost.key`. If either file
+already exists, the script exits and does not overwrite them.
+
+**Start** (stop `python run.py` first, or port 8080 is already taken):
+
+```bash
 docker compose up --build
 ```
 
-**Open the app at https://localhost:8443. Do not use port 443.** The certificate is self-signed, so the browser shows a warning page.
-On that page, click **Advanced**, then **Proceed to localhost**.
+**Open https://localhost:8443. Do not use port 443.** The certificate is self-signed, so the
+browser shows a warning. Click **Advanced**, then **Proceed to localhost**.
 
-`http://localhost:8080` redirects to the HTTPS address. The health check is https://localhost:8443/health.
-Stop with `Ctrl+C`, or `docker compose down` from another terminal.
+`http://localhost:8080` answers `308` and redirects to `https://localhost:8443`. The health
+check is https://localhost:8443/health. Stop with `Ctrl+C`, or `docker compose down` from
+another terminal.
 
 | Task | Command (while the containers are running) |
 | --- | --- |
 | Get the sign-in code for every seeded account | `docker compose exec web python scripts/totp_codes.py` |
 | Code for one account | `docker compose exec web python scripts/totp_codes.py delegate` |
-| Run the tests | `docker compose exec web pytest` |
+| Run the tests | `docker compose exec web python -m pytest` |
 | See the app log | `docker compose logs -f web` |
 | See the container status | `docker compose ps` |
 | Rebuild after changing code or `requirements.txt` | `docker compose up --build` |
@@ -137,18 +189,11 @@ Things to know:
 
 - **The database is temporary.** `docker-compose.yml` keeps `/app/data` in memory (`tmpfs`), so
   every time the container stops or restarts the databases are wiped and the seeded accounts and
-  election are created again. This also means you never need to delete `.db` files when you
-  use Docker.
-- **Only nginx is reachable from outside.** The `web` container has no published port, so every
-  request goes through HTTPS. If `docker compose up` says port 8080 is already in use, stop the
-  local app (`python run.py`) first.
-- **Where the settings come from.** Inside the container the app does not read `.env` (the
-  `.dockerignore` keeps it out of the image). The settings come from the `environment:` block of
-  `docker-compose.yml`, and `PII_ENCRYPTION_KEY` is passed in from your `.env`. The other values
-  in that block are examples (`dev-...-change-me`): change them before showing or sharing the app,
-  and never reuse them anywhere real.
+  election are created again. You do not delete `.db` files when you use Docker.
+- **Only nginx is reachable from the host.** It is bound to `127.0.0.1` (ports 8080 and 8443),
+  not to your LAN address. The `web` container has no published port.
 - **Nothing secret goes into the image.** `.dockerignore` excludes `.env`, `.secrets/`,
-  `nginx/certs/`, `venv/`, `.git/` and `data/`.
+  `nginx/certs/`, `venv/`, `.git/` and `data/`. The certificate is mounted into nginx at start.
 
 ## Seeded desks
 

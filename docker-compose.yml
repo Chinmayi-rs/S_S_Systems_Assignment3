@@ -7,6 +7,8 @@ services:
       HOST: "0.0.0.0"
       PORT: "8080"
       FLASK_ENV: production
+      ENFORCE_TLS: "1"
+      PUBLIC_HTTPS_URL: https://localhost:8443
       PII_ENCRYPTION_KEY: "${PII_ENCRYPTION_KEY:?Missing PII key}"
       SECRET_KEY: dev-secret-change-me
       JWT_SECRET_KEY: dev-jwt-secret-change-me

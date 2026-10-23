@@ -1,5 +1,9 @@
 name: GR19 Security CI
 
+# GR-19: every push and pull request runs tests, SAST and a dependency audit.
+# The gate job fails unless all three succeed. On GitHub, protect `main` and
+# require the check named "GR19 Gate" so a red stage cannot be merged.
+
 on:
   push:
   pull_request:
@@ -48,7 +52,7 @@ jobs:
         run: python -m pip install bandit
 
       - name: Scan application
-        run: python -m bandit -r app run.py
+        run: python -m bandit -r app run.py security
 
   dependencies:
     name: GR19 Dependency Audit
@@ -69,3 +73,17 @@ jobs:
 
       - name: Audit dependencies
         run: python -m pip_audit -r requirements.txt --strict
+
+  gate:
+    name: GR19 Gate
+    needs: [tests, sast, dependencies]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block unless every stage passed
+        env:
+          TESTS: ${{ needs.tests.result }}
+          SAST: ${{ needs.sast.result }}
+          DEPS: ${{ needs.dependencies.result }}
+        run: |
+          python -c 'import os,sys; bad={k:os.environ[k] for k in ("TESTS","SAST","DEPS") if os.environ[k]!="success"}; print(bad or "GR-19 all stages passed"); sys.exit(1 if bad else 0)'

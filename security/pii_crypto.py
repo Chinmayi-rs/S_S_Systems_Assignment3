@@ -6,7 +6,12 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 class PIICipher:
-    """Encrypt and decrypt voter fields using an externally supplied key."""
+    """Encrypt and decrypt voter fields using an externally supplied key.
+
+    The key is never stored in the enrolment database. It comes from
+    PII_ENCRYPTION_KEY, or from the file named by PII_ENCRYPTION_KEY_FILE
+    (a Docker secret mounted outside the database volume).
+    """
 
     def __init__(self, key):
         if len(key) != 32:
@@ -16,7 +21,17 @@ class PIICipher:
 
     @classmethod
     def from_environment(cls):
-        encoded_key = os.environ.get("PII_ENCRYPTION_KEY")
+        encoded_key = (os.environ.get("PII_ENCRYPTION_KEY") or "").strip()
+        if not encoded_key:
+            key_path = (os.environ.get("PII_ENCRYPTION_KEY_FILE") or "").strip()
+            if key_path:
+                try:
+                    with open(key_path, encoding="ascii") as handle:
+                        encoded_key = handle.read().strip()
+                except OSError as error:
+                    raise RuntimeError(
+                        "PII_ENCRYPTION_KEY_FILE could not be read."
+                    ) from error
 
         if not encoded_key:
             raise RuntimeError("PII_ENCRYPTION_KEY is not configured.")

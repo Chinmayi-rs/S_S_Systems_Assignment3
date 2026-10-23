@@ -38,6 +38,9 @@ def create_app():
     # GR-01: lock the account for 15 minutes after 5 consecutive failures.
     app.config['LOGIN_LOCKOUT_THRESHOLD'] = int(os.environ.get('LOGIN_LOCKOUT_THRESHOLD', '5'))
     app.config['LOGIN_LOCKOUT_MINUTES'] = int(os.environ.get('LOGIN_LOCKOUT_MINUTES', '15'))
+    # GR-17: Docker turns this on. Direct `python run.py` stays plain HTTP for local tests.
+    app.config['ENFORCE_TLS'] = os.environ.get('ENFORCE_TLS', '').lower() in ('1', 'true', 'yes')
+    app.config['PUBLIC_HTTPS_URL'] = os.environ.get('PUBLIC_HTTPS_URL', 'https://localhost:8443')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('IDENTITY_DATABASE_URL', identity_default)
     app.config['SQLALCHEMY_BINDS'] = {
         'ballot': os.environ.get('BALLOT_DATABASE_URL', ballot_default),
@@ -95,6 +98,8 @@ def create_app():
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
     app.register_blueprint(approvals_bp, url_prefix='/api/approvals')
     app.register_blueprint(integrity_bp, url_prefix='/api/integrity')
+    from app.utils.tls_guard import install_tls_guard
+    install_tls_guard(app)
     with app.app_context():
         db.create_all()
         from app.services.seed import seed_if_empty
